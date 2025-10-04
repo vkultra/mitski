@@ -104,11 +104,15 @@ class TestTypingEffectIntegration:
                     mock_block.delay_seconds = 3
                     mock_block.auto_delete_seconds = 0
 
-                    mock_repo.get_blocks_by_offer.return_value = [mock_block]
+                    # Use AsyncMock para métodos assíncronos
+                    mock_repo.get_blocks_by_offer = AsyncMock(return_value=[mock_block])
 
                     mock_api = AsyncMock()
                     mock_api.send_message.return_value = {"result": {"message_id": 123}}
                     mock_api_class.return_value = mock_api
+
+                    # Mock apply_typing_effect como async
+                    mock_typing.apply_typing_effect = AsyncMock()
 
                     # Execute
                     sender = PitchSenderService("test_token")
@@ -137,11 +141,17 @@ class TestTypingEffectIntegration:
                     mock_block.delay_seconds = 0
                     mock_block.auto_delete_seconds = 0
 
-                    mock_repo.get_blocks_by_action.return_value = [mock_block]
+                    # Use AsyncMock para métodos assíncronos
+                    mock_repo.get_blocks_by_action = AsyncMock(
+                        return_value=[mock_block]
+                    )
 
                     mock_api = AsyncMock()
                     mock_api.send_message.return_value = {"result": {"message_id": 456}}
                     mock_api_class.return_value = mock_api
+
+                    # Mock apply_typing_effect como async
+                    mock_typing.apply_typing_effect = AsyncMock()
 
                     # Execute
                     sender = ActionSenderService("test_token")
@@ -180,34 +190,37 @@ class TestTypingEffectIntegration:
         call_args = mock_api.send_chat_action.call_args
         assert call_args[1]["action"] == "upload_photo"
 
-    @pytest.mark.asyncio
-    async def test_deliverable_sender_sync_integration(self):
+    def test_deliverable_sender_sync_integration(self):
         """Testa versão síncrona do deliverable sender"""
         from services.offers.deliverable_sender import DeliverableSender
 
         with patch(
             "services.offers.deliverable_sender.OfferDeliverableBlockRepository"
         ) as mock_repo:
-            with patch("workers.api_clients.TelegramAPI") as mock_api_class:
-                with patch("services.typing_effect.TypingEffectService") as mock_typing:
-                    # Setup
-                    mock_block = MagicMock()
-                    mock_block.text = "Conteúdo entregue"
-                    mock_block.media_file_id = None
-                    mock_block.media_type = None
-                    mock_block.delay_seconds = 2
-                    mock_block.auto_delete_seconds = 0
+            with patch("services.typing_effect.TypingEffectService") as mock_typing:
+                # Setup
+                mock_block = MagicMock()
+                mock_block.text = "Conteúdo entregue"
+                mock_block.media_file_id = None
+                mock_block.media_type = None
+                mock_block.delay_seconds = 2
+                mock_block.auto_delete_seconds = 0
 
-                    mock_repo.get_blocks_by_offer_sync.return_value = [mock_block]
+                mock_repo.get_blocks_by_offer_sync.return_value = [mock_block]
 
-                    mock_api = MagicMock()
-                    mock_api.send_message_sync.return_value = {
-                        "result": {"message_id": 789}
-                    }
-                    mock_api_class.return_value = mock_api
+                # Mock apply_typing_effect_sync
+                mock_typing.apply_typing_effect_sync = MagicMock()
+
+                # Create sender and patch its telegram_api
+                sender = DeliverableSender("test_token")
+
+                # Mock the telegram_api.send_message_sync method
+                with patch.object(
+                    sender.telegram_api, "send_message_sync"
+                ) as mock_send:
+                    mock_send.return_value = {"result": {"message_id": 789}}
 
                     # Execute
-                    sender = DeliverableSender("test_token")
                     result = sender.send_deliverable_sync(
                         offer_id=2, chat_id=345678, preview_mode=False
                     )
@@ -224,24 +237,31 @@ class TestTypingEffectIntegration:
         with patch(
             "services.offers.manual_verification_sender.OfferManualVerificationBlockRepository"
         ) as mock_repo:
-            with patch("workers.api_clients.TelegramAPI") as mock_api_class:
-                with patch("services.typing_effect.TypingEffectService") as mock_typing:
-                    # Setup
-                    mock_block = MagicMock()
-                    mock_block.text = "Por favor, verifique o pagamento"
-                    mock_block.media_file_id = None
-                    mock_block.media_type = None
-                    mock_block.delay_seconds = 1
-                    mock_block.auto_delete_seconds = 0
+            with patch("services.typing_effect.TypingEffectService") as mock_typing:
+                # Setup
+                mock_block = MagicMock()
+                mock_block.text = "Por favor, verifique o pagamento"
+                mock_block.media_file_id = None
+                mock_block.media_type = None
+                mock_block.delay_seconds = 1
+                mock_block.auto_delete_seconds = 0
 
-                    mock_repo.get_blocks_by_offer.return_value = [mock_block]
+                # Use AsyncMock para métodos assíncronos
+                mock_repo.get_blocks_by_offer = AsyncMock(return_value=[mock_block])
 
-                    mock_api = AsyncMock()
-                    mock_api.send_message.return_value = {"result": {"message_id": 999}}
-                    mock_api_class.return_value = mock_api
+                # Mock apply_typing_effect como async
+                mock_typing.apply_typing_effect = AsyncMock()
+
+                # Create sender and patch its telegram_api
+                sender = ManualVerificationSender("test_token")
+
+                # Mock the telegram_api.send_message method
+                with patch.object(
+                    sender.telegram_api, "send_message", new_callable=AsyncMock
+                ) as mock_send:
+                    mock_send.return_value = {"result": {"message_id": 999}}
 
                     # Execute
-                    sender = ManualVerificationSender("test_token")
                     result = await sender.send_manual_verification(
                         offer_id=3, chat_id=987654
                     )

@@ -20,7 +20,9 @@ class TestTelegramAPI:
         api = TelegramAPI()
 
         with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = MagicMock()
+            from unittest.mock import AsyncMock
+
+            mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.json.return_value = {"ok": True, "result": True}
             mock_response.raise_for_status = MagicMock()
@@ -45,6 +47,8 @@ class TestTelegramAPI:
     @pytest.mark.asyncio
     async def test_send_chat_action_all_types(self):
         """Testa todos os tipos de ação suportados"""
+        from unittest.mock import AsyncMock
+
         api = TelegramAPI()
         action_types = [
             "typing",
@@ -62,7 +66,7 @@ class TestTelegramAPI:
 
         for action in action_types:
             with patch("httpx.AsyncClient") as mock_client_class:
-                mock_client = MagicMock()
+                mock_client = AsyncMock()
                 mock_response = MagicMock()
                 mock_response.json.return_value = {"ok": True}
                 mock_response.raise_for_status = MagicMock()
@@ -158,10 +162,12 @@ class TestTelegramAPI:
     @pytest.mark.asyncio
     async def test_send_message_integration(self):
         """Testa integração do send_message existente"""
+        from unittest.mock import AsyncMock
+
         api = TelegramAPI()
 
         with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = MagicMock()
+            mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.json.return_value = {
                 "ok": True,
