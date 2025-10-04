@@ -15,7 +15,7 @@ class TelegramAPI:
 
     async def get_me(self, token: str) -> Dict[str, Any]:
         """Obtém informações do bot"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(f"{self.BASE_URL}{token}/getMe")
             response.raise_for_status()
             return response.json()["result"]
@@ -29,7 +29,7 @@ class TelegramAPI:
         drop_pending_updates: bool = True,
     ) -> Dict[str, Any]:
         """Configura webhook do bot"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self.BASE_URL}{token}/setWebhook",
                 json={
@@ -67,7 +67,7 @@ class TelegramAPI:
 
     async def send_message(self, token: str, chat_id: int, text: str) -> Dict[str, Any]:
         """Envia mensagem (versão assíncrona)"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self.BASE_URL}{token}/sendMessage",
                 json={"chat_id": chat_id, "text": text},
@@ -77,7 +77,7 @@ class TelegramAPI:
 
     async def delete_message(self, token: str, chat_id: int, message_id: int) -> bool:
         """Deleta mensagem"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self.BASE_URL}{token}/deleteMessage",
                 json={"chat_id": chat_id, "message_id": message_id},

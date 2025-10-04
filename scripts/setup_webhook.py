@@ -28,7 +28,7 @@ async def setup_webhook():
     print("🔧 Configurando webhook...")
     print(f"📍 URL: {webhook_url}")
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         # Define webhook
         response = await client.post(
             f"https://api.telegram.org/bot{token}/setWebhook",

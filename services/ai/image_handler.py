@@ -26,7 +26,7 @@ class ImageHandler:
             bytes da imagem
         """
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 # 1. Obter file_path
                 file_info_response = await client.get(
                     f"https://api.telegram.org/bot{bot_token}/getFile",

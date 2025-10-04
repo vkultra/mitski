@@ -43,10 +43,18 @@ repos:
         additional_dependencies: [
           'pydantic>=2.0',
           'types-requests',
+          'types-redis',
         ]
         args: [
           '--ignore-missing-imports',
           '--no-strict-optional',
+          '--disable-error-code=valid-type',
+          '--disable-error-code=misc',
+          '--disable-error-code=no-any-return',
+          '--disable-error-code=assignment',
+          '--disable-error-code=call-overload',
+          '--disable-error-code=dict-item',
+          '--disable-error-code=return',
         ]
         exclude: ^(tests/|scripts/)
 

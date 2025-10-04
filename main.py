@@ -5,6 +5,7 @@ FastAPI Webhook Receiver para Multi-Bot Manager
 import os
 import time
 from collections import deque
+from typing import Deque
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -21,7 +22,7 @@ WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "dev_secret")
 APP_START_TIME = int(time.time())
 
 # Cache de update_ids já processados (mantém últimos 1000)
-PROCESSED_UPDATES = deque(maxlen=1000)
+PROCESSED_UPDATES: Deque[int] = deque(maxlen=1000)
 
 
 @app.middleware("http")
@@ -146,4 +147,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # nosec B104

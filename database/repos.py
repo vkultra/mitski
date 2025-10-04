@@ -231,7 +231,7 @@ class AIPhaseRepository:
             # Se marcar como inicial, desmarcar outras fases iniciais
             if is_initial:
                 session.query(AIPhase).filter(
-                    AIPhase.bot_id == bot_id, AIPhase.is_initial == True
+                    AIPhase.bot_id == bot_id, AIPhase.is_initial.is_(True)
                 ).update({"is_initial": False})
 
             phase = AIPhase(
@@ -389,7 +389,7 @@ class AIPhaseRepository:
 
             # Desmarcar todas as fases iniciais do bot
             session.query(AIPhase).filter(
-                AIPhase.bot_id == bot_id, AIPhase.is_initial == True
+                AIPhase.bot_id == bot_id, AIPhase.is_initial.is_(True)
             ).update({"is_initial": False})
 
             # Marcar nova fase como inicial
