@@ -3,7 +3,7 @@ Repository Pattern para acesso ao banco
 """
 
 import os
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +11,16 @@ from sqlalchemy.orm import sessionmaker
 from core.telemetry import logger
 
 from .models import Bot, User
+
+if TYPE_CHECKING:
+    from .models import (
+        AIAction,
+        AIActionBlock,
+        Offer,
+        OfferDeliverable,
+        OfferPitchBlock,
+        UserActionStatus,
+    )
 
 # Configuração do engine
 engine = create_engine(
@@ -780,7 +790,7 @@ class OfferRepository:
                 .filter(
                     Offer.bot_id == bot_id,
                     func.lower(Offer.name) == name.lower(),
-                    Offer.is_active == True,
+                    Offer.is_active.is_(True),
                 )
                 .first()
             )
@@ -793,7 +803,7 @@ class OfferRepository:
         with SessionLocal() as session:
             query = session.query(Offer).filter(Offer.bot_id == bot_id)
             if active_only:
-                query = query.filter(Offer.is_active == True)
+                query = query.filter(Offer.is_active.is_(True))
             return query.order_by(Offer.created_at.desc()).all()
 
     @staticmethod
@@ -1741,7 +1751,7 @@ class AIActionRepository:
         with SessionLocal() as session:
             query = session.query(AIAction).filter(AIAction.bot_id == bot_id)
             if active_only:
-                query = query.filter(AIAction.is_active == True)
+                query = query.filter(AIAction.is_active.is_(True))
             return query.order_by(AIAction.created_at.desc()).all()
 
     @staticmethod
@@ -1754,8 +1764,8 @@ class AIActionRepository:
                 session.query(AIAction)
                 .filter(
                     AIAction.bot_id == bot_id,
-                    AIAction.is_active == True,
-                    AIAction.track_usage == True,
+                    AIAction.is_active.is_(True),
+                    AIAction.track_usage.is_(True),
                 )
                 .all()
             )
@@ -1801,8 +1811,8 @@ class AIActionRepository:
                 session.query(AIAction)
                 .filter(
                     AIAction.bot_id == bot_id,
-                    AIAction.is_active == True,
-                    AIAction.track_usage == True,
+                    AIAction.is_active.is_(True),
+                    AIAction.track_usage.is_(True),
                 )
                 .all()
             )

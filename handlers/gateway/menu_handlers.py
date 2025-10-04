@@ -5,7 +5,6 @@ Handlers de menu de gateway
 from typing import Any, Dict
 
 from core.config import settings
-from core.telemetry import logger
 from services.gateway.gateway_service import GatewayService
 
 

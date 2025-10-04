@@ -96,7 +96,7 @@ def process_telegram_update(self, bot_id: int, update: dict):
 
 
 @celery_app.task(bind=True, max_retries=3)
-def process_manager_update(self, update: dict):
+def process_manager_update(self, update: dict):  # noqa: C901
     """Processa update do bot gerenciador"""
     import asyncio
     import os

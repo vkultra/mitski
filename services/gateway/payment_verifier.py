@@ -2,7 +2,7 @@
 Verificador de pagamentos e entregador de conteúdo
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 from core.redis_client import redis_client
 from core.security import decrypt
@@ -49,7 +49,7 @@ class PaymentVerifier:
             }
 
         # Busca token
-        bot = await BotRepository.get_by_id(transaction.bot_id)
+        bot = await BotRepository.get_bot_by_id(transaction.bot_id)
         if not bot:
             return {"status": "error", "delivered": False, "transaction": transaction}
 
@@ -137,7 +137,7 @@ class PaymentVerifier:
                 return True
 
             # Busca bot para enviar mensagens
-            bot = await BotRepository.get_by_id(transaction.bot_id)
+            bot = await BotRepository.get_bot_by_id(transaction.bot_id)
             if not bot:
                 logger.error(
                     "Bot not found for delivery",

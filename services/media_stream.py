@@ -76,7 +76,7 @@ class MediaStreamService:
 
         try:
             # Obter informações do arquivo
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 # Get file info
                 file_info_response = await client.get(
                     f"https://api.telegram.org/bot{token}/getFile",

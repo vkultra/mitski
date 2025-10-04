@@ -6,11 +6,7 @@ from typing import Optional
 
 from core.security import decrypt, encrypt
 from core.telemetry import logger
-from database.repos import (
-    BotGatewayConfigRepository,
-    BotRepository,
-    GatewayConfigRepository,
-)
+from database.repos import BotGatewayConfigRepository, GatewayConfigRepository
 
 from .pushinpay_client import PushinPayClient
 

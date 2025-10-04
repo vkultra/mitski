@@ -3,10 +3,13 @@ Serviço de envio de blocos de entregável
 """
 
 import asyncio
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from database.models import OfferDeliverableBlock
 
 from core.telemetry import logger
-from database.repos import OfferDeliverableBlockRepository, OfferRepository
+from database.repos import OfferDeliverableBlockRepository
 from workers.api_clients import TelegramAPI
 
 
@@ -311,7 +314,9 @@ class DeliverableSender:
 
         return None
 
-    def _extract_file_id_from_result(self, result: dict, media_type: str) -> Optional[str]:
+    def _extract_file_id_from_result(
+        self, result: dict, media_type: str
+    ) -> Optional[str]:
         """Extrai file_id do resultado da API do Telegram"""
         try:
             message = result.get("result", {})

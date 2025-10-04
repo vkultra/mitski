@@ -235,7 +235,7 @@ async def handle_action_block_autodel_input(
     if autodel > 0:
         result["text"] = f"✅ Auto-delete configurado: {autodel}s\n\n" + result["text"]
     else:
-        result["text"] = f"✅ Auto-delete desabilitado\n\n" + result["text"]
+        result["text"] = "✅ Auto-delete desabilitado\n\n" + result["text"]
 
     return result
 
@@ -255,12 +255,12 @@ async def handle_action_block_view(user_id: int, block_id: int) -> Dict[str, Any
     if block.text:
         info += f"💬 Texto: `{block.text[:100]}{'...' if len(block.text) > 100 else ''}`\n\n"
     else:
-        info += f"💬 Texto: _vazio_\n\n"
+        info += "💬 Texto: _vazio_\n\n"
 
     if block.media_file_id:
         info += f"📎 Mídia: {block.media_type}\n\n"
     else:
-        info += f"📎 Mídia: _nenhuma_\n\n"
+        info += "📎 Mídia: _nenhuma_\n\n"
 
     if block.delay_seconds:
         info += f"⏰ Delay: {block.delay_seconds}s\n"

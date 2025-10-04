@@ -3,10 +3,13 @@ Serviço de detecção de ofertas em mensagens
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from core.telemetry import logger
 from database.repos import OfferRepository
+
+if TYPE_CHECKING:
+    from database.models import Offer
 
 
 class OfferDetectorService:

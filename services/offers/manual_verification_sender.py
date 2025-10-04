@@ -3,11 +3,14 @@ Serviço de envio de blocos de verificação manual
 """
 
 import asyncio
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from core.telemetry import logger
 from database.repos import OfferManualVerificationBlockRepository
 from workers.api_clients import TelegramAPI
+
+if TYPE_CHECKING:
+    from database.models import OfferManualVerificationBlock
 
 
 class ManualVerificationSender:

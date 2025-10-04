@@ -3,11 +3,14 @@ Serviço de envio de pitch de ofertas
 """
 
 import asyncio
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from core.telemetry import logger
 from database.repos import OfferPitchRepository, OfferRepository
 from workers.api_clients import TelegramAPI
+
+if TYPE_CHECKING:
+    from database.models import OfferPitchBlock
 
 
 class PitchSenderService:
@@ -22,7 +25,9 @@ class PitchSenderService:
         """
         self.bot_token = bot_token
         self.telegram_api = TelegramAPI()
-        self.sent_messages = []  # Para rastrear mensagens enviadas (auto-delete)
+        self.sent_messages: List[int] = (
+            []
+        )  # Para rastrear mensagens enviadas (auto-delete)
 
     async def send_pitch(
         self,
@@ -130,10 +135,11 @@ class PitchSenderService:
                     transaction_created = transaction
 
                     # Inicia verificação automática se transação foi criada
-                    if transaction:
+                    if transaction and hasattr(transaction, "id"):
                         from workers.payment_tasks import start_payment_verification
 
-                        start_payment_verification.delay(transaction.id)
+                        transaction_id = getattr(transaction, "id")
+                        start_payment_verification.delay(transaction_id)
 
             # Se tem mídia
             if block.media_file_id:
@@ -202,9 +208,11 @@ class PitchSenderService:
                     original_file_id=file_id,
                     bot_id=bot_id,
                     media_type=media_type,
-                    manager_bot_token=self.telegram_api.manager_bot_token
-                    if hasattr(self.telegram_api, "manager_bot_token")
-                    else None,
+                    manager_bot_token=(
+                        self.telegram_api.manager_bot_token
+                        if hasattr(self.telegram_api, "manager_bot_token")
+                        else None
+                    ),
                 )
 
                 if cached_file_id:
@@ -219,9 +227,9 @@ class PitchSenderService:
                 result = await self.telegram_api.send_photo(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    photo=file_stream
-                    if file_stream
-                    else file_to_send,  # Stream ou file_id
+                    photo=(
+                        file_stream if file_stream else file_to_send
+                    ),  # Stream ou file_id
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -291,7 +299,9 @@ class PitchSenderService:
 
         return None
 
-    def _extract_file_id_from_result(self, result: dict, media_type: str) -> Optional[str]:
+    def _extract_file_id_from_result(
+        self, result: dict, media_type: str
+    ) -> Optional[str]:
         """Extrai file_id do resultado da API do Telegram"""
         try:
             message = result.get("result", {})

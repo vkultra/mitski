@@ -3,10 +3,13 @@ Serviço de detecção de ações em mensagens da IA
 """
 
 import re
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from core.telemetry import logger
 from database.repos import AIActionRepository
+
+if TYPE_CHECKING:
+    from database.models import AIAction
 
 
 class ActionDetectorService:
@@ -99,7 +102,7 @@ class ActionDetectorService:
         Returns:
             Lista de ações detectadas
         """
-        detected = []
+        detected: List[AIAction] = []
         actions = await AIActionRepository.get_actions_by_bot(bot_id, active_only=True)
 
         if not actions:

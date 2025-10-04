@@ -2,7 +2,7 @@
 Tasks Celery para verificação automática de pagamentos PIX
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core.redis_client import redis_client
 from core.security import decrypt

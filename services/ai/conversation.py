@@ -14,6 +14,7 @@ from database.repos import (
 from services.ai.grok_client import GrokAPIClient
 from services.ai.image_handler import ImageHandler
 from services.ai.phase_detector import PhaseDetectorService
+from services.gateway.payment_verifier import PaymentVerifier
 
 
 class AIConversationService:
@@ -286,8 +287,6 @@ class AIConversationService:
             answer = f"{answer}__ACTION_DETECTED:{action_result['action_id']}__"
 
         # 15. Verificar se a IA enviou termo de verificação manual
-        from services.gateway.payment_verifier import PaymentVerifier
-
         manual_verify_result = (
             await AIConversationService._check_manual_verification_trigger(
                 bot_id=bot_id,
@@ -408,8 +407,6 @@ class AIConversationService:
 
                 if pending_transactions:
                     # Há transação pendente - verificar pagamento
-                    from services.gateway.payment_verifier import PaymentVerifier
-
                     transaction = pending_transactions[0]
 
                     # Verificar status via API

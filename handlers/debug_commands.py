@@ -2,7 +2,6 @@
 Comandos de debug para testar o sistema de ações, ofertas e pagamentos
 """
 
-import asyncio
 from typing import Dict, Optional
 
 from core.telemetry import logger
@@ -55,7 +54,7 @@ class DebugCommandHandler:
 
             # Buscar oferta
             if offer_name:
-                offer = await OfferRepository.get_by_name(bot_id, offer_name)
+                offer = await OfferRepository.get_offer_by_name(bot_id, offer_name)
             else:
                 # Pegar primeira oferta ativa do bot
                 offers = await OfferRepository.get_offers_by_bot(
@@ -134,7 +133,11 @@ class DebugCommandHandler:
 
     @staticmethod
     async def handle_trigger_action(
-        bot_id: int, chat_id: int, action_name: str, bot_token: str, verbose: bool = False
+        bot_id: int,
+        chat_id: int,
+        action_name: str,
+        bot_token: str,
+        verbose: bool = False,
     ) -> Dict:
         """
         Dispara uma ação personalizada pelo nome
@@ -160,7 +163,7 @@ class DebugCommandHandler:
             )
 
             # Buscar ação
-            action = await AIActionRepository.get_by_name(bot_id, action_name)
+            action = await AIActionRepository.get_action_by_name(bot_id, action_name)
 
             if not action:
                 await TelegramAPI().send_message(
@@ -250,7 +253,7 @@ class DebugCommandHandler:
             )
 
             # Buscar oferta
-            offer = await OfferRepository.get_by_name(bot_id, offer_name)
+            offer = await OfferRepository.get_offer_by_name(bot_id, offer_name)
 
             if not offer:
                 await TelegramAPI().send_message(
@@ -314,50 +317,6 @@ class DebugCommandHandler:
             return {"success": False, "error": str(e)}
 
 
-async def _send_media(
-    bot_token: str,
-    chat_id: int,
-    file_id: str,
-    media_type: str,
-    caption: Optional[str] = None,
-) -> bool:
-    """
-    Helper para enviar mídia
-
-    Args:
-        bot_token: Token do bot
-        chat_id: ID do chat
-        file_id: ID do arquivo
-        media_type: Tipo da mídia
-        caption: Legenda opcional
-
-    Returns:
-        True se enviou com sucesso
-    """
-    try:
-        api = TelegramAPI()
-
-        if media_type == "photo":
-            await api.send_photo(bot_token, chat_id, file_id, caption)
-        elif media_type == "video":
-            await api.send_video(bot_token, chat_id, file_id, caption)
-        elif media_type == "document":
-            await api.send_document(bot_token, chat_id, file_id, caption)
-        elif media_type == "audio":
-            await api.send_audio(bot_token, chat_id, file_id, caption)
-        else:
-            logger.warning(f"Tipo de mídia não suportado: {media_type}")
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.error(
-            "Erro ao enviar mídia", extra={"error": str(e), "media_type": media_type}
-        )
-        return False
-
-
 async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
     """
     Lista todos os comandos de debug disponíveis
@@ -401,7 +360,9 @@ async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
         if offers:
             help_text += "💰 **Ofertas (Pitch):**\n"
             for offer in offers:
-                help_text += f"• `/{offer.name}` - Envia pitch (R$ {offer.price})\n"
+                help_text += (
+                    f"• `/{offer.name}` - Envia pitch ({offer.value or 'Sem valor'})\n"
+                )
             help_text += "\n"
 
         if not actions and not offers:
@@ -409,8 +370,12 @@ async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
 
         help_text += "📝 **Como usar:**\n"
         help_text += "1. Digite o comando exatamente como mostrado\n"
-        help_text += "2. **Modo Silencioso** (padrão): `/comando` - Simula 100% o real\n"
-        help_text += "3. **Modo Verbose**: `/comando verbose` - Mostra mensagens de debug\n"
+        help_text += (
+            "2. **Modo Silencioso** (padrão): `/comando` - Simula 100% o real\n"
+        )
+        help_text += (
+            "3. **Modo Verbose**: `/comando verbose` - Mostra mensagens de debug\n"
+        )
         help_text += "4. Use para testar fluxos sem pagamento real\n\n"
         help_text += "💡 **Exemplos:**\n"
         help_text += "• `/vendaaprovada` - Entrega sem mensagens extras\n"

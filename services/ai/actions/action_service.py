@@ -2,7 +2,7 @@
 Serviço principal de gerenciamento de ações
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from core.telemetry import logger
 from database.repos import AIActionRepository, UserActionStatusRepository

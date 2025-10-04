@@ -86,7 +86,9 @@ class DebugCommandRouter:
             )
 
         # Comando: /vendaaprovada (com suporte a verbose)
-        if command_lower.startswith("vendaaprovada") or command_lower.startswith("venda_aprovada"):
+        if command_lower.startswith("vendaaprovada") or command_lower.startswith(
+            "venda_aprovada"
+        ):
             # Verificar se tem parâmetro verbose
             verbose = "verbose" in command_lower or "v" in command_lower.split()
             return await DebugCommandHandler.handle_venda_aprovada(
@@ -103,7 +105,7 @@ class DebugCommandRouter:
         base_command = parts[0] if parts else command
         verbose = len(parts) > 1 and parts[1].lower() in ["verbose", "v"]
 
-        action = await AIActionRepository.get_by_name(bot_id, base_command)
+        action = await AIActionRepository.get_action_by_name(bot_id, base_command)
         if action and action.is_active:
             logger.info(
                 "Debug command matched action",
@@ -119,11 +121,11 @@ class DebugCommandRouter:
                 chat_id=chat_id,
                 action_name=base_command,
                 bot_token=bot_token,
-                verbose=verbose
+                verbose=verbose,
             )
 
         # Verificar se é uma oferta
-        offer = await OfferRepository.get_by_name(bot_id, base_command)
+        offer = await OfferRepository.get_offer_by_name(bot_id, base_command)
         if offer and offer.is_active:
             logger.info(
                 "Debug command matched offer",
