@@ -1,8 +1,10 @@
 """
 Configurações da aplicação usando Pydantic
 """
-from pydantic_settings import BaseSettings
+
 from typing import List
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -43,6 +45,17 @@ class Settings(BaseSettings):
     # Circuit Breaker
     CIRCUIT_BREAKER_FAIL_MAX: int = 5
     CIRCUIT_BREAKER_TIMEOUT: int = 60
+
+    # Grok API (xAI)
+    XAI_API_KEY: str = ""
+    GROK_API_BASE_URL: str = "https://api.x.ai/v1"
+    GROK_TIMEOUT: int = 30
+
+    # IA Features
+    AI_HISTORY_LIMIT: int = 7  # mensagens (7 pares user+assistant = 14 total)
+    AI_DEFAULT_TEMPERATURE: float = 0.7
+    AI_MAX_TOKENS: int = 2000
+    AI_RATE_LIMIT_PER_MINUTE: int = 480
 
     class Config:
         env_file = ".env"

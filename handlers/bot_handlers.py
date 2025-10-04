@@ -1,17 +1,11 @@
 """
 Handlers genéricos para bots secundários
 """
-from typing import Dict, Any
 
 
 async def handle_bot_start(bot_id: int, user_id: int) -> str:
     """Handler genérico para /start de bots secundários"""
-    return """
-👋 Bem-vindo!
-
-Este bot está ativo e pronto para uso.
-Digite /help para ver os comandos disponíveis.
-    """
+    return "OK, bot funcional!"
 
 
 async def handle_bot_help(bot_id: int, user_id: int) -> str:

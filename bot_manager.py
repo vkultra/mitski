@@ -1,13 +1,16 @@
 """
 Bot Gerenciador - Comandos administrativos
 """
+
 import os
-from typing import Optional
-from database.repos import BotRepository
+
 from core.security import encrypt
+from database.repos import BotRepository
 from workers.api_clients import TelegramAPI
 
-ALLOWED_ADMIN_IDS = [int(x) for x in os.environ.get("ALLOWED_ADMIN_IDS", "").split(",") if x]
+ALLOWED_ADMIN_IDS = [
+    int(x) for x in os.environ.get("ALLOWED_ADMIN_IDS", "").split(",") if x
+]
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "http://localhost:8000")
 
 
@@ -30,12 +33,14 @@ async def register_bot(admin_id: int, bot_token: str) -> dict:
     bot_info = await telegram_api.get_me(bot_token)
 
     # 2. Salva no banco com token criptografado
-    bot = await BotRepository.create_bot({
-        'admin_id': admin_id,
-        'token': encrypt(bot_token),
-        'username': bot_info.get('username'),
-        'webhook_secret': os.urandom(32).hex()
-    })
+    bot = await BotRepository.create_bot(
+        {
+            "admin_id": admin_id,
+            "token": encrypt(bot_token),
+            "username": bot_info.get("username"),
+            "webhook_secret": os.urandom(32).hex(),
+        }
+    )
 
     # 3. Configura webhook no Telegram
     webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{bot.id}"
@@ -44,14 +49,14 @@ async def register_bot(admin_id: int, bot_token: str) -> dict:
         url=webhook_url,
         secret_token=bot.webhook_secret,
         allowed_updates=["message", "callback_query"],
-        drop_pending_updates=True
+        drop_pending_updates=True,
     )
 
     return {
         "id": bot.id,
         "username": bot.username,
         "webhook_url": webhook_url,
-        "status": "active"
+        "status": "active",
     }
 
 

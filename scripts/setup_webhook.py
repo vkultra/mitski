@@ -2,9 +2,10 @@
 """
 Script para configurar webhook do bot gerenciador
 """
-import httpx
-import os
 import asyncio
+import os
+
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,9 +13,9 @@ load_dotenv()
 
 async def setup_webhook():
     """Configura webhook do bot gerenciador no Telegram"""
-    token = os.environ.get('MANAGER_BOT_TOKEN')
+    token = os.environ.get("MANAGER_BOT_TOKEN")
     webhook_url = f"{os.environ.get('WEBHOOK_BASE_URL')}/webhook/manager"
-    secret = os.environ.get('TELEGRAM_WEBHOOK_SECRET')
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
 
     if not token:
         print("❌ MANAGER_BOT_TOKEN não configurado no .env")
@@ -24,7 +25,7 @@ async def setup_webhook():
         print("❌ TELEGRAM_WEBHOOK_SECRET não configurado no .env")
         return
 
-    print(f"🔧 Configurando webhook...")
+    print("🔧 Configurando webhook...")
     print(f"📍 URL: {webhook_url}")
 
     async with httpx.AsyncClient() as client:
@@ -35,13 +36,13 @@ async def setup_webhook():
                 "url": webhook_url,
                 "secret_token": secret,
                 "allowed_updates": ["message", "callback_query"],
-                "drop_pending_updates": True
-            }
+                "drop_pending_updates": True,
+            },
         )
 
         result = response.json()
 
-        if result.get('ok'):
+        if result.get("ok"):
             print("✅ Webhook configurado com sucesso!")
         else:
             print(f"❌ Erro: {result.get('description')}")
@@ -53,8 +54,8 @@ async def setup_webhook():
 
         info = info_response.json()
 
-        if info.get('ok'):
-            webhook_info = info['result']
+        if info.get("ok"):
+            webhook_info = info["result"]
             print("\n📋 Informações do Webhook:")
             print(f"  URL: {webhook_info.get('url')}")
             print(f"  Pending updates: {webhook_info.get('pending_update_count', 0)}")

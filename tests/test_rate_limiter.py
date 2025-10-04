@@ -1,7 +1,9 @@
 """
 Testes para rate limiter
 """
+
 import pytest
+
 from core.rate_limiter import check_rate_limit
 from core.redis_client import redis_client
 

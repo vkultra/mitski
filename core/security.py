@@ -1,14 +1,16 @@
 """
 Módulo de segurança: criptografia, HMAC, assinaturas
 """
-import os
-import hmac
-import hashlib
-import time
-import json
+
 import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from typing import Any, Dict
+
 from cryptography.fernet import Fernet
-from typing import Dict, Any
 
 # Chave de criptografia (deve vir de variável de ambiente)
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", Fernet.generate_key())
@@ -45,7 +47,7 @@ def sign_payload(data: Dict[str, Any], ttl: int = 300) -> str:
         Token assinado em base64url
     """
     data_with_ts = {**data, "ts": int(time.time())}
-    raw = json.dumps(data_with_ts, separators=(',', ':')).encode()
+    raw = json.dumps(data_with_ts, separators=(",", ":")).encode()
     mac = hmac.new(HMAC_SECRET, raw, hashlib.sha256).digest()[:8]
     return base64.urlsafe_b64encode(raw + mac).decode()
 

@@ -1,17 +1,16 @@
 """
 Rate Limiter distribuído usando Redis
 """
-import time
+
 import json
 import os
+import time
+
 from core.redis_client import redis_client
 
 # Carrega limites do ambiente
 RATE_LIMITS = json.loads(
-    os.environ.get(
-        "RATE_LIMITS_JSON",
-        '{"default":{"limit":30,"window":60}}'
-    )
+    os.environ.get("RATE_LIMITS_JSON", '{"default":{"limit":30,"window":60}}')
 )
 
 
@@ -20,7 +19,7 @@ def check_rate_limit(
     user_id: int,
     action: str = "default",
     limit: int = None,
-    window: int = None
+    window: int = None,
 ) -> bool:
     """
     Verifica rate limit usando janela deslizante
@@ -87,6 +86,7 @@ def with_lock(key: str, ttl: int = 5):
         def process_payment(user_id):
             ...
     """
+
     def decorator(fn):
         def wrapper(*args, **kwargs):
             lock_key = f"lock:{key}"
@@ -103,4 +103,5 @@ def with_lock(key: str, ttl: int = 5):
                 redis_client.delete(lock_key)
 
         return wrapper
+
     return decorator

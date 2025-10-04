@@ -1,11 +1,14 @@
 """
 FastAPI Webhook Receiver para Multi-Bot Manager
 """
+
 import os
-from fastapi import FastAPI, Request, HTTPException
-from workers.tasks import process_telegram_update, process_manager_update
-from database.repos import BotRepository
+
+from fastapi import FastAPI, HTTPException, Request
+
 from core.telemetry import logger
+from database.repos import BotRepository
+from workers.tasks import process_manager_update, process_telegram_update
 
 app = FastAPI(title="Telegram Multi-Bot Manager")
 
@@ -19,12 +22,15 @@ async def validate_telegram_signature(request: Request, call_next):
         secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
 
         # Log para debug
-        logger.info("Webhook received", extra={
-            "path": request.url.path,
-            "secret_received": secret,
-            "secret_expected": WEBHOOK_SECRET,
-            "headers": dict(request.headers)
-        })
+        logger.info(
+            "Webhook received",
+            extra={
+                "path": request.url.path,
+                "secret_received": secret,
+                "secret_expected": WEBHOOK_SECRET,
+                "headers": dict(request.headers),
+            },
+        )
 
         # Desabilitar validação em desenvolvimento (ngrok)
         # if secret != WEBHOOK_SECRET:
@@ -46,17 +52,15 @@ async def manager_webhook(request: Request):
 
         update = await request.json()
 
-        logger.info("Manager update received", extra={
-            "update": update
-        })
+        logger.info("Manager update received", extra={"update": update})
 
         process_manager_update.delay(update)
         return {"ok": True}
     except Exception as e:
-        logger.error("Error processing manager webhook", extra={
-            "error": str(e),
-            "error_type": type(e).__name__
-        })
+        logger.error(
+            "Error processing manager webhook",
+            extra={"error": str(e), "error_type": type(e).__name__},
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -73,10 +77,7 @@ async def webhook(bot_id: int, request: Request):
     update_data = await request.json()
 
     # Enfileira processamento (não bloqueia)
-    process_telegram_update.delay(
-        bot_id=bot_config.id,
-        update=update_data
-    )
+    process_telegram_update.delay(bot_id=bot_config.id, update=update_data)
 
     return {"ok": True}
 
@@ -89,4 +90,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

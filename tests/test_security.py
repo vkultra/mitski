@@ -1,12 +1,17 @@
 """
 Testes para módulo de segurança
 """
-import pytest
+
 import time
+
+import pytest
+
 from core.security import (
-    encrypt, decrypt,
-    sign_payload, verify_payload,
-    generate_secret
+    decrypt,
+    encrypt,
+    generate_secret,
+    sign_payload,
+    verify_payload,
 )
 
 
@@ -22,14 +27,14 @@ def test_encrypt_decrypt():
 
 def test_sign_payload_and_verify():
     """Deve assinar e verificar payload corretamente"""
-    payload = {'user_id': 123, 'action': 'payment'}
+    payload = {"user_id": 123, "action": "payment"}
     token = sign_payload(payload, ttl=300)
 
     verified = verify_payload(token)
 
-    assert verified['user_id'] == 123
-    assert verified['action'] == 'payment'
-    assert 'ts' in verified
+    assert verified["user_id"] == 123
+    assert verified["action"] == "payment"
+    assert "ts" in verified
 
 
 def test_verify_invalid_token():
@@ -40,7 +45,7 @@ def test_verify_invalid_token():
 
 def test_verify_expired_token():
     """Deve rejeitar token expirado"""
-    payload = {'user_id': 123}
+    payload = {"user_id": 123}
     token = sign_payload(payload, ttl=1)
 
     # Aguarda expiração
@@ -52,11 +57,11 @@ def test_verify_expired_token():
 
 def test_verify_tampered_token():
     """Deve rejeitar token adulterado"""
-    payload = {'user_id': 123}
+    payload = {"user_id": 123}
     token = sign_payload(payload)
 
     # Adultera o token
-    tampered = token[:-1] + ('X' if token[-1] != 'X' else 'Y')
+    tampered = token[:-1] + ("X" if token[-1] != "X" else "Y")
 
     with pytest.raises(ValueError):
         verify_payload(tampered)
