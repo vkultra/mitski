@@ -3,7 +3,8 @@
 
 set -e
 
-echo "= Iniciando smoke tests..."
+echo "=
+ Iniciando smoke tests..."
 
 # Cores para output
 GREEN='\033[0;32m'

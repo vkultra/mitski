@@ -102,7 +102,11 @@ class AIConfigService:
 
     @staticmethod
     async def create_phase(
-        bot_id: int, name: str, prompt: str, trigger: str = None, is_initial: bool = False
+        bot_id: int,
+        name: str,
+        prompt: str,
+        trigger: str = None,
+        is_initial: bool = False,
     ):
         """
         Cria nova fase (proxy para AIPhaseService)
@@ -117,7 +121,9 @@ class AIConfigService:
         Returns:
             AIPhase criada
         """
-        return await AIPhaseService.create_phase(bot_id, name, prompt, trigger, is_initial)
+        return await AIPhaseService.create_phase(
+            bot_id, name, prompt, trigger, is_initial
+        )
 
     @staticmethod
     async def list_phases(bot_id: int):

@@ -82,7 +82,12 @@ async def handle_bot_selected_for_ai(user_id: int, bot_id: int) -> Dict[str, Any
                     "callback_data": f"ai_general_prompt:{bot_id}",
                 }
             ],
-            [{"text": "📋 Gerenciar Fases", "callback_data": f"ai_list_phases:{bot_id}"}],
+            [
+                {
+                    "text": "📋 Gerenciar Fases",
+                    "callback_data": f"ai_list_phases:{bot_id}",
+                }
+            ],
             [
                 {
                     "text": f"🔄 Modelo: {model_label}",
@@ -156,7 +161,7 @@ async def handle_phase_name_input(
     )
 
     return {
-        "text": f'✅ Nome: `{name}`\n\nAgora digite um termo único (gatilho):\n\n⚠️ Preferir termos não comuns:\n• `fcf4`\n• `eko3`\n• `zx9p`\n\nQuando a IA retornar este termo, a fase mudará automaticamente.',
+        "text": f"✅ Nome: `{name}`\n\nAgora digite um termo único (gatilho):\n\n⚠️ Preferir termos não comuns:\n• `fcf4`\n• `eko3`\n• `zx9p`\n\nQuando a IA retornar este termo, a fase mudará automaticamente.",
         "keyboard": None,
     }
 

@@ -120,11 +120,17 @@ class GrokAPIClient:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "num_messages": len(messages),
-                "system_prompt": messages[0].get("content", "")[:200]
-                if messages and messages[0].get("role") == "system"
-                else None,
+                "system_prompt": (
+                    messages[0].get("content", "")[:200]
+                    if messages and messages[0].get("role") == "system"
+                    else None
+                ),
                 "last_user_message": next(
-                    (m.get("content", "")[:200] for m in reversed(messages) if m.get("role") == "user"),
+                    (
+                        m.get("content", "")[:200]
+                        for m in reversed(messages)
+                        if m.get("role") == "user"
+                    ),
                     None,
                 ),
             },
@@ -182,7 +188,9 @@ class GrokAPIClient:
                         "cached_tokens": result["usage"]["cached_tokens"],
                         "concurrent_requests": self.max_concurrent
                         - self.semaphore._value,
-                        "response_preview": result["content"][:200] if result["content"] else None,
+                        "response_preview": (
+                            result["content"][:200] if result["content"] else None
+                        ),
                         "has_reasoning": bool(result["reasoning_content"]),
                         "finish_reason": result["finish_reason"],
                     },

@@ -26,7 +26,8 @@ test: ## Roda todos os testes
 	docker-compose exec webhook pytest tests/ -v
 
 smoke: ## Roda smoke tests
-	@echo "$(GREEN)= Executando smoke tests...$(NC)"
+	@echo "$(GREEN)=
+ Executando smoke tests...$(NC)"
 	bash scripts/smoke_test.sh
 
 coverage: ## Gera relatório de cobertura
@@ -35,7 +36,8 @@ coverage: ## Gera relatório de cobertura
 	@echo "$(GREEN)=Â Abra htmlcov/index.html para ver o relatório$(NC)"
 
 lint: ## Verifica qualidade do código
-	@echo "$(GREEN)= Verificando código...$(NC)"
+	@echo "$(GREEN)=
+ Verificando código...$(NC)"
 	black --check .
 	isort --check-only .
 	flake8 .
@@ -48,7 +50,8 @@ format: ## Formata o código automaticamente
 	@echo "$(GREEN) Código formatado!$(NC)"
 
 pre-commit: ## Roda pre-commit em todos os arquivos
-	@echo "$(GREEN)= Executando pre-commit hooks...$(NC)"
+	@echo "$(GREEN)=
+ Executando pre-commit hooks...$(NC)"
 	pre-commit run --all-files
 
 up: ## Inicia todos os serviços

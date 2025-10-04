@@ -5,9 +5,10 @@ Repository Pattern para acesso ao banco
 import os
 from typing import List, Optional
 
-from core.telemetry import logger
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from core.telemetry import logger
 
 from .models import Bot, User
 
@@ -313,7 +314,7 @@ class AIPhaseRepository:
         with SessionLocal() as session:
             return (
                 session.query(AIPhase)
-                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial.is_(True))
                 .first()
             )
 
@@ -325,7 +326,7 @@ class AIPhaseRepository:
         with SessionLocal() as session:
             return (
                 session.query(AIPhase)
-                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial.is_(True))
                 .first()
             )
 
@@ -344,7 +345,7 @@ class AIPhaseRepository:
             # Buscar fase inicial
             initial_phase = (
                 session.query(AIPhase)
-                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial.is_(True))
                 .first()
             )
 
@@ -354,7 +355,10 @@ class AIPhaseRepository:
                     bot_id=bot_id,
                     phase_name="Inicial",
                     phase_trigger=None,
-                    phase_prompt="Você está na fase inicial. Seja acolhedor e pergunte como pode ajudar.",
+                    phase_prompt=(
+                        "Você está na fase inicial. "
+                        "Seja acolhedor e pergunte como pode ajudar."
+                    ),
                     is_initial=True,
                     order=0,
                 )

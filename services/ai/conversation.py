@@ -67,9 +67,9 @@ class AIConversationService:
                 "model_type": ai_config.model_type,
                 "temperature": float(ai_config.temperature),
                 "max_tokens": ai_config.max_tokens,
-                "general_prompt_preview": ai_config.general_prompt[:200]
-                if ai_config.general_prompt
-                else None,
+                "general_prompt_preview": (
+                    ai_config.general_prompt[:200] if ai_config.general_prompt else None
+                ),
             },
         )
 
@@ -94,7 +94,9 @@ class AIConversationService:
                 "bot_id": bot_id,
                 "user_telegram_id": user_telegram_id,
                 "current_phase_id": session.current_phase_id,
-                "current_phase_name": current_phase.phase_name if current_phase else None,
+                "current_phase_name": (
+                    current_phase.phase_name if current_phase else None
+                ),
                 "history_size": len(history),
             },
         )

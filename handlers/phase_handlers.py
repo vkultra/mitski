@@ -17,7 +17,9 @@ from services.ai.phase_service import AIPhaseService
 from services.conversation_state import ConversationStateManager
 
 
-async def handle_create_initial_phase_click(user_id: int, bot_id: int) -> Dict[str, Any]:
+async def handle_create_initial_phase_click(
+    user_id: int, bot_id: int
+) -> Dict[str, Any]:
     """Inicia criação de fase inicial (pede apenas o prompt)"""
     if user_id not in settings.allowed_admin_ids_list:
         return {"text": "⛔ Acesso negado.", "keyboard": None}
@@ -35,7 +37,7 @@ async def handle_create_initial_phase_click(user_id: int, bot_id: int) -> Dict[s
     )
 
     return {
-        "text": "⭐ *Criar Fase Inicial*\n\nA fase inicial sempre começa quando um novo usuário interage com o bot.\n\nDigite o prompt desta fase:\n\nExemplo: \"Você está na fase de boas-vindas. Seja amigável e pergunte como pode ajudar.\"",
+        "text": '⭐ *Criar Fase Inicial*\n\nA fase inicial sempre começa quando um novo usuário interage com o bot.\n\nDigite o prompt desta fase:\n\nExemplo: "Você está na fase de boas-vindas. Seja amigável e pergunte como pode ajudar."',
         "keyboard": None,
     }
 
@@ -158,7 +160,9 @@ async def handle_view_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
         text = f"📋 **{phase.phase_name}**\n\n"
         text += f"🔑 **Trigger:** `{phase.phase_trigger}`\n\n"
         text += "📝 **Prompt:**\n{}\n\n".format(phase.phase_prompt)
-        text += f"ℹ️ Quando a IA retornar `{phase.phase_trigger}`, esta fase será ativada."
+        text += (
+            f"ℹ️ Quando a IA retornar `{phase.phase_trigger}`, esta fase será ativada."
+        )
 
     # Botões de ação
     buttons = []
@@ -209,9 +213,7 @@ async def handle_set_initial_phase(user_id: int, phase_id: int) -> Dict[str, Any
         return {"text": "❌ Erro ao definir fase inicial.", "keyboard": None}
 
 
-async def handle_confirm_delete_phase(
-    user_id: int, phase_id: int
-) -> Dict[str, Any]:
+async def handle_confirm_delete_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
     """Confirmação antes de deletar fase"""
     if user_id not in settings.allowed_admin_ids_list:
         return {"text": "⛔ Acesso negado.", "keyboard": None}

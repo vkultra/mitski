@@ -138,7 +138,10 @@ class AIPhaseService:
             initial_phase = await AIPhaseRepository.create_phase(
                 bot_id=bot_id,
                 name="Inicial",
-                prompt="Você está na fase inicial. Seja acolhedor e pergunte como pode ajudar.",
+                prompt=(
+                    "Você está na fase inicial. "
+                    "Seja acolhedor e pergunte como pode ajudar."
+                ),
                 trigger=None,
                 is_initial=True,
                 order=0,
