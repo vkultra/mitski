@@ -27,6 +27,7 @@ class ManualVerificationSender:
         self,
         offer_id: int,
         chat_id: int,
+        bot_id: int = None,
     ) -> List[int]:
         """
         Envia mensagens de verificação manual

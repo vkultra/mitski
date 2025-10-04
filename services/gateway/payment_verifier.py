@@ -151,7 +151,7 @@ class PaymentVerifier:
             # Envia blocos de entregável
             sender = DeliverableSender(decrypt(bot.token))
             await sender.send_deliverable(
-                transaction.offer_id, transaction.chat_id, preview_mode=False
+                transaction.offer_id, transaction.chat_id, preview_mode=False, bot_id=bot.id
             )
 
             # Marca como entregue
