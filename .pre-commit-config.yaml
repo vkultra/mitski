@@ -1,50 +1,41 @@
 # Pre-commit hooks configuration
-# Instalar: pre-commit install
-# Rodar manualmente: pre-commit run --all-files
-
 repos:
-  # Hooks básicos do pre-commit
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
-      - id: trailing-whitespace        # Remove espaços em branco no final das linhas
-      - id: end-of-file-fixer          # Garante linha vazia no final do arquivo
-      - id: check-yaml                 # Valida arquivos YAML
-      - id: check-json                 # Valida arquivos JSON
-      - id: check-added-large-files    # Bloqueia arquivos grandes (>500KB)
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
         args: ['--maxkb=500']
-      - id: check-merge-conflict       # Detecta marcadores de merge conflict
-      - id: check-case-conflict        # Detecta conflitos de case em nomes de arquivos
-      - id: mixed-line-ending          # Detecta quebras de linha mistas
-      - id: detect-private-key         # Detecta chaves privadas commitadas
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+      - id: detect-private-key
 
-  # Black - Formatador de código Python
   - repo: https://github.com/psf/black
     rev: 24.10.0
     hooks:
       - id: black
-        language_version: python3.11
         args: ['--line-length=88']
 
-  # isort - Organiza imports
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
         args: ['--profile', 'black', '--line-length', '88']
 
-  # Flake8 - Linter Python
   - repo: https://github.com/PyCQA/flake8
     rev: 7.1.1
     hooks:
       - id: flake8
         args: [
           '--max-line-length=88',
-          '--extend-ignore=E203,W503',  # Compatível com Black
+          '--extend-ignore=E203,W503',
           '--exclude=venv,.git,__pycache__,.pytest_cache',
         ]
 
-  # MyPy - Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
     hooks:
@@ -57,9 +48,8 @@ repos:
           '--ignore-missing-imports',
           '--no-strict-optional',
         ]
-        exclude: ^(tests/|scripts/)  # Ignora testes e scripts
+        exclude: ^(tests/|scripts/)
 
-  # Segurança - Detecta problemas de segurança
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.10
     hooks:
@@ -68,9 +58,7 @@ repos:
         additional_dependencies: ['bandit[toml]']
         exclude: ^tests/
 
-# Configuração global
 default_language_version:
-  python: python3.11
+  python: python3
 
-# Opções globais
-fail_fast: false  # Continua executando mesmo se um hook falhar
+fail_fast: false
