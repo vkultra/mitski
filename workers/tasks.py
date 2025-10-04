@@ -60,10 +60,7 @@ def process_telegram_update(self, bot_id: int, update: dict):
         if text == "/start":
             from handlers.bot_handlers import handle_bot_start
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            welcome_text = loop.run_until_complete(handle_bot_start(bot.id, user_id))
-            loop.close()
+            welcome_text = asyncio.run(handle_bot_start(bot.id, user_id))
             send_message.delay(bot.id, user_id, welcome_text)
         elif text.startswith("/api"):
             call_external_api.delay(bot_id, user_id, text)
@@ -83,6 +80,15 @@ def process_manager_update(self, update: dict):
         handle_start,
         handle_text_input,
     )
+    from handlers.phase_handlers import (
+        handle_confirm_delete_phase,
+        handle_create_initial_phase_click,
+        handle_delete_phase,
+        handle_initial_phase_prompt_input,
+        handle_list_phases,
+        handle_set_initial_phase,
+        handle_view_phase,
+    )
     from workers.api_clients import TelegramAPI
 
     telegram_api = TelegramAPI()
@@ -96,72 +102,87 @@ def process_manager_update(self, update: dict):
         message_id = callback_query["message"]["message_id"]
         callback_data = callback_query.get("data", "")
 
-        # Responder callback
-        telegram_api.answer_callback_query_sync(
-            token=manager_token, callback_query_id=callback_query["id"]
-        )
-
-        # Roteamento de callbacks
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Usar asyncio.run() ao invés de criar/destruir loops
+        response = None
 
         if callback_data == "add_bot":
-            response = loop.run_until_complete(handle_callback_add_bot(user_id))
+            response = asyncio.run(handle_callback_add_bot(user_id))
         elif callback_data == "list_bots":
-            response = loop.run_until_complete(handle_callback_list_bots(user_id))
+            response = asyncio.run(handle_callback_list_bots(user_id))
         elif callback_data == "deactivate_menu":
-            response = loop.run_until_complete(handle_callback_deactivate_menu(user_id))
+            response = asyncio.run(handle_callback_deactivate_menu(user_id))
         elif callback_data.startswith("deactivate:"):
             bot_id = int(callback_data.split(":")[1])
-            response_text = loop.run_until_complete(handle_deactivate(user_id, bot_id))
+            response_text = asyncio.run(handle_deactivate(user_id, bot_id))
             response = {"text": response_text, "keyboard": None}
         # IA Menu callbacks
         elif callback_data == "ai_menu":
             from handlers.ai_handlers import handle_ai_menu_click
 
-            response = loop.run_until_complete(handle_ai_menu_click(user_id))
+            response = asyncio.run(handle_ai_menu_click(user_id))
         elif callback_data.startswith("ai_select_bot:"):
             bot_id = int(callback_data.split(":")[1])
             from handlers.ai_handlers import handle_bot_selected_for_ai
 
-            response = loop.run_until_complete(
-                handle_bot_selected_for_ai(user_id, bot_id)
-            )
+            response = asyncio.run(handle_bot_selected_for_ai(user_id, bot_id))
         elif callback_data.startswith("ai_general_prompt:"):
             bot_id = int(callback_data.split(":")[1])
             from handlers.ai_handlers import handle_general_prompt_click
 
-            response = loop.run_until_complete(
-                handle_general_prompt_click(user_id, bot_id)
-            )
+            response = asyncio.run(handle_general_prompt_click(user_id, bot_id))
         elif callback_data.startswith("ai_create_phase:"):
             bot_id = int(callback_data.split(":")[1])
             from handlers.ai_handlers import handle_create_phase_click
 
-            response = loop.run_until_complete(
-                handle_create_phase_click(user_id, bot_id)
-            )
+            response = asyncio.run(handle_create_phase_click(user_id, bot_id))
         elif callback_data.startswith("ai_toggle_model:"):
             bot_id = int(callback_data.split(":")[1])
             from handlers.ai_handlers import handle_toggle_model
 
-            response = loop.run_until_complete(handle_toggle_model(user_id, bot_id))
+            response = asyncio.run(handle_toggle_model(user_id, bot_id))
+        # Phase management callbacks
+        elif callback_data.startswith("ai_list_phases:"):
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_list_phases(user_id, bot_id))
+        elif callback_data.startswith("ai_view_phase:"):
+            phase_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_view_phase(user_id, phase_id))
+        elif callback_data.startswith("ai_create_initial:"):
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_create_initial_phase_click(user_id, bot_id))
+        elif callback_data.startswith("ai_set_initial:"):
+            phase_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_set_initial_phase(user_id, phase_id))
+        elif callback_data.startswith("ai_confirm_delete:"):
+            phase_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_confirm_delete_phase(user_id, phase_id))
+        elif callback_data.startswith("ai_delete_phase:"):
+            phase_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_delete_phase(user_id, phase_id))
         elif callback_data == "back_to_main":
-            response = loop.run_until_complete(handle_start(user_id))
-        else:
-            loop.close()
-            return
+            response = asyncio.run(handle_start(user_id))
 
-        loop.close()
+        # Responder callback IMEDIATAMENTE (antes de editar mensagem)
+        # para evitar timeout do Telegram (~5 segundos)
+        try:
+            telegram_api.answer_callback_query_sync(
+                token=manager_token, callback_query_id=callback_query["id"]
+            )
+        except Exception as e:
+            logger.warning(
+                "Falha ao responder callback (provavelmente expirado)",
+                extra={"callback_id": callback_query["id"], "error": str(e)},
+            )
 
-        # Editar mensagem com nova resposta
-        telegram_api.edit_message_sync(
-            token=manager_token,
-            chat_id=chat_id,
-            message_id=message_id,
-            text=response["text"],
-            keyboard=response.get("keyboard"),
-        )
+        # Se houver response, editar mensagem
+        if response:
+            telegram_api.edit_message_sync(
+                token=manager_token,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=response["text"],
+                keyboard=response.get("keyboard"),
+            )
         return
 
     # Processar mensagem de texto
@@ -174,15 +195,13 @@ def process_manager_update(self, update: dict):
         return
 
     # Roteamento de comandos e estados conversacionais
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     response = None
 
     if text == "/start":
-        response = loop.run_until_complete(handle_start(user_id))
+        response = asyncio.run(handle_start(user_id))
     else:
         # Tenta processar como entrada de estado conversacional
-        response = loop.run_until_complete(handle_text_input(user_id, text))
+        response = asyncio.run(handle_text_input(user_id, text))
 
         # Se não tem estado de bot, verifica estado de IA
         if not response:
@@ -197,27 +216,39 @@ def process_manager_update(self, update: dict):
                 if state == "awaiting_general_prompt":
                     from handlers.ai_handlers import handle_general_prompt_input
 
-                    response = loop.run_until_complete(
+                    response = asyncio.run(
                         handle_general_prompt_input(user_id, data["bot_id"], text)
+                    )
+
+                elif state == "awaiting_phase_name":
+                    from handlers.ai_handlers import handle_phase_name_input
+
+                    response = asyncio.run(
+                        handle_phase_name_input(user_id, data["bot_id"], text)
                     )
 
                 elif state == "awaiting_phase_trigger":
                     from handlers.ai_handlers import handle_phase_trigger_input
 
-                    response = loop.run_until_complete(
-                        handle_phase_trigger_input(user_id, data["bot_id"], text)
+                    response = asyncio.run(
+                        handle_phase_trigger_input(
+                            user_id, data["bot_id"], data["name"], text
+                        )
                     )
 
                 elif state == "awaiting_phase_prompt":
                     from handlers.ai_handlers import handle_phase_prompt_input
 
-                    response = loop.run_until_complete(
+                    response = asyncio.run(
                         handle_phase_prompt_input(
-                            user_id, data["bot_id"], data["trigger"], text
+                            user_id, data["bot_id"], data["name"], data["trigger"], text
                         )
                     )
 
-    loop.close()
+                elif state == "awaiting_initial_phase_prompt":
+                    response = asyncio.run(
+                        handle_initial_phase_prompt_input(user_id, data["bot_id"], text)
+                    )
 
     # Enviar resposta
     if response:
