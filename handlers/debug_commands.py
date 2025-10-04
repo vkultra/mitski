@@ -87,7 +87,7 @@ class DebugCommandHandler:
                 bot_token,
                 chat_id,
                 f"✅ Simulando pagamento aprovado para oferta: {offer.name}\n"
-                f"💰 Valor: R$ {offer.price}\n\n"
+                f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
                 f"Entregando conteúdo...",
             )
 
@@ -261,7 +261,7 @@ class DebugCommandHandler:
                 bot_token,
                 chat_id,
                 f"🎯 Enviando pitch da oferta: {offer.name}\n"
-                f"💰 Valor: R$ {offer.price}\n\n"
+                f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
                 f"Enviando blocos do pitch...",
             )
 
