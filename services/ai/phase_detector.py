@@ -34,6 +34,11 @@ class PhaseDetectorService:
 
         for phase in phases:
             trigger = phase.phase_trigger
+
+            # Pula fases sem trigger (ex: fase inicial)
+            if not trigger:
+                continue
+
             trigger_lower = trigger.lower()
 
             # Busca simples case-insensitive
