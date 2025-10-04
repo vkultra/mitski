@@ -1048,15 +1048,41 @@ def call_external_api(self, bot_id: int, user_id: int, query: str):
 
 @celery_app.task
 def send_message(bot_id: int, user_id: int, text: str):
-    """Envia mensagem pelo bot correto"""
+    """Envia mensagem pelo bot correto com efeito de digitação"""
     bot = BotRepository.get_bot_by_id_sync(bot_id)
     if not bot:
         return
 
+    from services.typing_effect import TypingEffectService
     from workers.api_clients import TelegramAPI
 
     telegram_api = TelegramAPI()
-    telegram_api.send_message_sync(token=decrypt(bot.token), chat_id=user_id, text=text)
+    token = decrypt(bot.token)
+
+    # Verifica se há mensagens separadas por |
+    messages = TypingEffectService.split_message(text)
+
+    if len(messages) > 1:
+        # Múltiplas mensagens - envia cada uma com typing effect
+        for msg in messages:
+            # Aplica efeito de digitação
+            TypingEffectService.apply_typing_effect_sync(
+                api=telegram_api,
+                token=token,
+                chat_id=user_id,
+                text=msg,
+                media_type=None,
+            )
+
+            # Envia a mensagem
+            telegram_api.send_message_sync(token=token, chat_id=user_id, text=msg)
+    else:
+        # Mensagem única - aplica typing effect e envia
+        TypingEffectService.apply_typing_effect_sync(
+            api=telegram_api, token=token, chat_id=user_id, text=text, media_type=None
+        )
+
+        telegram_api.send_message_sync(token=token, chat_id=user_id, text=text)
 
 
 @celery_app.task
@@ -1069,7 +1095,7 @@ def send_welcome(bot_id: int, user_id: int):
 
 @celery_app.task
 def send_rate_limit_message(bot_id: int, user_id: int):
-    """Envia mensagem de rate limit"""
+    """Envia mensagem de rate limit com typing effect"""
     send_message.delay(
         bot_id, user_id, "⏳ Muitos comandos em pouco tempo. Aguarde alguns segundos."
     )

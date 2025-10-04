@@ -427,3 +427,75 @@ class TelegramAPI:
                     time.sleep(2**attempt)
                     continue
                 raise
+
+    async def send_chat_action(
+        self,
+        token: str,
+        chat_id: int,
+        action: str,
+    ) -> Dict[str, Any]:
+        """
+        Envia ação de chat (typing, upload_photo, etc)
+
+        Args:
+            token: Token do bot
+            chat_id: ID do chat/usuário
+            action: Tipo de ação (typing, upload_photo, record_video, upload_video,
+                   record_voice, upload_voice, upload_document, find_location,
+                   record_video_note, upload_video_note, choose_sticker)
+
+        Returns:
+            Resposta da API do Telegram
+        """
+        payload = {
+            "chat_id": chat_id,
+            "action": action,
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendChatAction",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def send_chat_action_sync(
+        self,
+        token: str,
+        chat_id: int,
+        action: str,
+    ) -> Dict[str, Any]:
+        """
+        Envia ação de chat - versão síncrona para workers
+
+        Args:
+            token: Token do bot
+            chat_id: ID do chat/usuário
+            action: Tipo de ação (typing, upload_photo, record_video, upload_video,
+                   record_voice, upload_voice, upload_document, find_location,
+                   record_video_note, upload_video_note, choose_sticker)
+
+        Returns:
+            Resposta da API do Telegram
+        """
+        payload = {
+            "chat_id": chat_id,
+            "action": action,
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(
+                        f"{self.BASE_URL}{token}/sendChatAction",
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)  # Exponential backoff
+                    continue
+                raise

@@ -58,9 +58,33 @@ class DeliverableSender:
         message_ids = []
 
         for block in blocks:
-            # Aplicar delay se configurado (exceto em preview)
-            if block.delay_seconds > 0 and not preview_mode:
-                await asyncio.sleep(block.delay_seconds)
+            # Determina tipo de mídia para efeito apropriado
+            media_type = block.media_type if block.media_file_id else None
+
+            # Aplica efeito de digitação antes de enviar
+            if not preview_mode:
+                from services.typing_effect import TypingEffectService
+
+                # Se tem delay configurado, usa ele como base para o typing
+                if block.delay_seconds > 0:
+                    # Aplica typing durante o delay configurado
+                    await TypingEffectService.apply_typing_effect(
+                        api=self.telegram_api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                        custom_delay=block.delay_seconds,
+                    )
+                else:
+                    # Calcula delay natural baseado no texto
+                    await TypingEffectService.apply_typing_effect(
+                        api=self.telegram_api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                    )
 
             # Enviar mensagem baseado no tipo de conteúdo
             message_id = await self._send_block(block, chat_id, bot_id=bot_id)
@@ -105,8 +129,6 @@ class DeliverableSender:
         Returns:
             Lista de message_ids
         """
-        import time
-
         blocks = OfferDeliverableBlockRepository.get_blocks_by_offer_sync(offer_id)
 
         if not blocks:
@@ -115,8 +137,33 @@ class DeliverableSender:
         message_ids = []
 
         for block in blocks:
-            if block.delay_seconds > 0 and not preview_mode:
-                time.sleep(block.delay_seconds)
+            # Determina tipo de mídia para efeito apropriado
+            media_type = block.media_type if block.media_file_id else None
+
+            # Aplica efeito de digitação antes de enviar (versão síncrona)
+            if not preview_mode:
+                from services.typing_effect import TypingEffectService
+
+                # Se tem delay configurado, usa ele como base para o typing
+                if block.delay_seconds > 0:
+                    # Aplica typing durante o delay configurado
+                    TypingEffectService.apply_typing_effect_sync(
+                        api=self.telegram_api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                        custom_delay=block.delay_seconds,
+                    )
+                else:
+                    # Calcula delay natural baseado no texto
+                    TypingEffectService.apply_typing_effect_sync(
+                        api=self.telegram_api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                    )
 
             message_id = self._send_block_sync(block, chat_id)
 

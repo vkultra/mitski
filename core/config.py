@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     AI_MAX_TOKENS: int = 2000
     AI_RATE_LIMIT_PER_MINUTE: int = 480
 
+    # Typing Effect Settings
+    TYPING_CHARS_PER_MINUTE: int = 80  # Velocidade de digitação simulada
+    MIN_TYPING_DELAY: float = 2.0  # Delay mínimo em segundos
+    MAX_TYPING_DELAY: float = 7.0  # Delay máximo em segundos
+    TYPING_ACTION_INTERVAL: float = (
+        4.0  # Intervalo para reenviar action em mensagens longas
+    )
+
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -50,9 +50,33 @@ class ActionSenderService:
         message_ids = []
 
         for block in blocks:
-            # Aplicar delay (exceto no preview)
-            if not preview_mode and block.delay_seconds > 0:
-                await asyncio.sleep(block.delay_seconds)
+            # Determina tipo de mídia para efeito apropriado
+            media_type = block.media_type if block.media_file_id else None
+
+            # Aplica efeito de digitação antes de enviar
+            if not preview_mode:
+                from services.typing_effect import TypingEffectService
+
+                # Se tem delay configurado, usa ele como base para o typing
+                if block.delay_seconds > 0:
+                    # Aplica typing durante o delay configurado
+                    await TypingEffectService.apply_typing_effect(
+                        api=self.api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                        custom_delay=block.delay_seconds,
+                    )
+                else:
+                    # Calcula delay natural baseado no texto
+                    await TypingEffectService.apply_typing_effect(
+                        api=self.api,
+                        token=self.bot_token,
+                        chat_id=chat_id,
+                        text=block.text,
+                        media_type=media_type,
+                    )
 
             # Preparar conteúdo
             text = block.text or ""

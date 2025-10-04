@@ -77,10 +77,55 @@ def process_ai_message(
                 # Remover sufixo da mensagem antes de enviar
                 response_text = re.sub(r"__ACTION_DETECTED:\d+__", "", response_text)
 
-        # Enviar resposta (import aqui para evitar circular import)
-        from workers.tasks import send_message
+        # Aplica typing effect e envia resposta (import aqui para evitar circular import)
+        from services.typing_effect import TypingEffectService
+        from workers.api_clients import TelegramAPI
 
-        send_message.delay(bot_id, user_telegram_id, response_text)
+        # Verifica se há mensagens separadas por |
+        messages = TypingEffectService.split_message(response_text)
+
+        if len(messages) > 1:
+            # Múltiplas mensagens - envia cada uma com typing effect
+            api = TelegramAPI()
+            for i, msg in enumerate(messages):
+                # Aplica efeito de digitação antes de cada mensagem
+                TypingEffectService.apply_typing_effect_sync(
+                    api=api,
+                    token=bot_token,
+                    chat_id=user_telegram_id,
+                    text=msg,
+                    media_type=None,
+                )
+
+                # Envia a mensagem
+                api.send_message_sync(
+                    token=bot_token, chat_id=user_telegram_id, text=msg
+                )
+
+                logger.info(
+                    f"Sent AI message part {i+1}/{len(messages)}",
+                    extra={
+                        "bot_id": bot_id,
+                        "user_id": user_telegram_id,
+                        "part": i + 1,
+                        "total_parts": len(messages),
+                    },
+                )
+        else:
+            # Mensagem única - aplica typing effect e envia diretamente
+            api = TelegramAPI()
+            TypingEffectService.apply_typing_effect_sync(
+                api=api,
+                token=bot_token,
+                chat_id=user_telegram_id,
+                text=response_text,
+                media_type=None,
+            )
+
+            # Envia mensagem diretamente (sem delay para evitar duplo typing)
+            api.send_message_sync(
+                token=bot_token, chat_id=user_telegram_id, text=response_text
+            )
 
         # Se há oferta para enviar, enviar pitch após a mensagem
         if offer_id_to_send:
