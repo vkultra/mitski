@@ -19,7 +19,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_acks_late=True,  # confirma após processar
-    worker_prefetch_multiplier=1,  # pega 1 tarefa por vez
+    worker_prefetch_multiplier=10,  # pega 10 tarefas por vez (async tasks)
     task_track_started=True,
     task_time_limit=300,  # timeout de 5 minutos
     task_soft_time_limit=240,  # aviso aos 4 minutos

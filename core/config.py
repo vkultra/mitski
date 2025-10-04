@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     # Grok API (xAI)
     XAI_API_KEY: str = ""
     GROK_API_BASE_URL: str = "https://api.x.ai/v1"
-    GROK_TIMEOUT: int = 30
+    GROK_TIMEOUT: int = 60  # 60s para reasoning models
+    GROK_MAX_CONCURRENT_REQUESTS: int = 20  # Controle de concorrência
 
     # IA Features
     AI_HISTORY_LIMIT: int = 7  # mensagens (7 pares user+assistant = 14 total)

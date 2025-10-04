@@ -18,15 +18,30 @@ class GrokAPIClient:
     RATE_LIMIT_KEY = "grok_api_requests:{minute}"
     MAX_REQUESTS_PER_MINUTE = 480
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, max_concurrent: int = 20):
+        """
+        Inicializa cliente Grok API com controle de concorrência
+
+        Args:
+            api_key: Token de autenticação xAI
+            max_concurrent: Máximo de requisições simultâneas (default: 20)
+                           Recomendado pela xAI para evitar sobrecarga
+        """
         self.api_key = api_key
+        self.max_concurrent = max_concurrent
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+
+        # Connection pooling para reutilizar conexões TCP
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
+
         self.client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=30.0,
+            timeout=httpx.Timeout(60.0),  # 60s para reasoning models
+            limits=limits,
         )
 
     async def _check_rate_limit(self) -> bool:
@@ -103,21 +118,25 @@ class GrokAPIClient:
         }
 
         try:
-            response = await self.client.post("/chat/completions", json=payload)
-            response.raise_for_status()
+            # Controla concorrência com semaphore (recomendação xAI)
+            async with self.semaphore:
+                response = await self.client.post("/chat/completions", json=payload)
+                response.raise_for_status()
 
-            data = response.json()
+                data = response.json()
 
-            logger.info(
-                "Grok API request successful",
-                extra={
-                    "model": model,
-                    "usage": data.get("usage", {}),
-                    "cached_tokens": data.get("usage", {}).get("cached_tokens", 0),
-                },
-            )
+                logger.info(
+                    "Grok API request successful",
+                    extra={
+                        "model": model,
+                        "usage": data.get("usage", {}),
+                        "cached_tokens": data.get("usage", {}).get("cached_tokens", 0),
+                        "concurrent_requests": self.max_concurrent
+                        - self.semaphore._value,
+                    },
+                )
 
-            return data
+                return data
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:

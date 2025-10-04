@@ -82,8 +82,13 @@ class AIConversationService:
             ai_config, history, current_phase, text, image_urls
         )
 
-        # 7. Chamar Grok API
-        grok_client = GrokAPIClient(api_key=xai_api_key)
+        # 7. Chamar Grok API com controle de concorrência
+        from core.config import settings
+
+        grok_client = GrokAPIClient(
+            api_key=xai_api_key,
+            max_concurrent=settings.GROK_MAX_CONCURRENT_REQUESTS,
+        )
 
         model = (
             "grok-4-fast-reasoning"
