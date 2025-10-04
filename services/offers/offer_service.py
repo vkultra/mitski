@@ -20,6 +20,7 @@ class OfferService:
         chat_id: int,
         ai_message: str,
         bot_token: str,
+        user_telegram_id: Optional[int] = None,
     ) -> Optional[Dict]:
         """
         Processa mensagem da IA para detectar e substituir ofertas
@@ -29,6 +30,7 @@ class OfferService:
             chat_id: ID do chat/usuário
             ai_message: Mensagem gerada pela IA
             bot_token: Token do bot
+            user_telegram_id: ID do usuário no Telegram (para {pix})
 
         Returns:
             Dict com informações da oferta processada ou None
@@ -60,7 +62,9 @@ class OfferService:
         # Se deve substituir completamente, não enviar a mensagem original
         if should_replace:
             # Enviar apenas o pitch
-            message_ids = await sender.send_pitch(offer.id, chat_id)
+            message_ids = await sender.send_pitch(
+                offer.id, chat_id, bot_id=bot_id, user_telegram_id=user_telegram_id
+            )
 
             return {
                 "offer_detected": True,
@@ -85,6 +89,8 @@ class OfferService:
         offer_id: int,
         chat_id: int,
         bot_token: str,
+        bot_id: Optional[int] = None,
+        user_telegram_id: Optional[int] = None,
     ) -> int:
         """
         Envia pitch após mensagem original
@@ -93,12 +99,16 @@ class OfferService:
             offer_id: ID da oferta
             chat_id: ID do chat
             bot_token: Token do bot
+            bot_id: ID do bot (para cache de mídia)
+            user_telegram_id: ID do usuário no Telegram (para {pix})
 
         Returns:
             Número de mensagens enviadas
         """
         sender = PitchSenderService(bot_token)
-        message_ids = await sender.send_pitch(offer_id, chat_id)
+        message_ids = await sender.send_pitch(
+            offer_id, chat_id, bot_id=bot_id, user_telegram_id=user_telegram_id
+        )
 
         return len(message_ids)
 

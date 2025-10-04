@@ -83,6 +83,18 @@ class AIConversationService:
             bot_id, user_telegram_id, limit=AIConversationService.HISTORY_LIMIT * 2
         )
 
+        # 3.1 Se não há histórico, é uma nova conversa - resetar status das ações
+        if not history:
+            from database.repos import UserActionStatusRepository
+
+            await UserActionStatusRepository.reset_user_statuses(
+                bot_id, user_telegram_id
+            )
+            logger.info(
+                "New conversation detected, action statuses reset",
+                extra={"bot_id": bot_id, "user_telegram_id": user_telegram_id},
+            )
+
         # 4. Buscar fase atual
         current_phase = None
         if session.current_phase_id:
@@ -114,9 +126,15 @@ class AIConversationService:
                 except Exception as e:
                     logger.error("Failed to process image", extra={"error": str(e)})
 
-        # 6. Montar mensagens
-        messages = AIConversationService._build_messages(
-            ai_config, history, current_phase, text, image_urls
+        # 6. Montar mensagens com status de ações
+        messages = await AIConversationService._build_messages_with_actions(
+            ai_config,
+            history,
+            current_phase,
+            text,
+            image_urls,
+            bot_id,
+            user_telegram_id,
         )
 
         # 7. Chamar Grok API com controle de concorrência
@@ -216,6 +234,7 @@ class AIConversationService:
             chat_id=user_telegram_id,
             ai_message=answer,
             bot_token=bot_token,
+            user_telegram_id=user_telegram_id,
         )
 
         # Se uma oferta foi detectada e deve substituir a mensagem
@@ -237,7 +256,36 @@ class AIConversationService:
         if offer_result and offer_result.get("should_append_pitch"):
             answer = f"{answer}__OFFER_DETECTED:{offer_result['offer_id']}__"
 
-        # 14. Verificar se a IA enviou termo de verificação manual
+        # 14. Verificar se há ações na resposta da IA
+        from services.ai.actions import ActionService
+
+        action_result = await ActionService.process_ai_message_for_actions(
+            bot_id=bot_id,
+            chat_id=user_telegram_id,
+            user_telegram_id=user_telegram_id,
+            ai_message=answer,
+            bot_token=bot_token,
+        )
+
+        # Se uma ação foi detectada e deve substituir a mensagem
+        if action_result and action_result.get("replaced_message"):
+            logger.info(
+                "Action replaced AI message",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "action_id": action_result.get("action_id"),
+                    "action_name": action_result.get("action_name"),
+                },
+            )
+            # Retornar None para indicar que a mensagem foi substituída
+            return None
+
+        # Se deve adicionar blocos da ação após a mensagem
+        if action_result and action_result.get("should_append_blocks"):
+            answer = f"{answer}__ACTION_DETECTED:{action_result['action_id']}__"
+
+        # 15. Verificar se a IA enviou termo de verificação manual
         from services.gateway.payment_verifier import PaymentVerifier
 
         manual_verify_result = (
@@ -263,10 +311,16 @@ class AIConversationService:
         return answer
 
     @staticmethod
-    def _build_messages(
-        ai_config, history: List, current_phase, user_text: str, image_urls: List[str]
+    async def _build_messages_with_actions(
+        ai_config,
+        history: List,
+        current_phase,
+        user_text: str,
+        image_urls: List[str],
+        bot_id: int,
+        user_telegram_id: int,
     ) -> List[Dict[str, Any]]:
-        """Monta payload de mensagens"""
+        """Monta payload de mensagens com status de ações"""
         messages = []
 
         # System prompt
@@ -274,6 +328,19 @@ class AIConversationService:
 
         if current_phase:
             system_prompt += f"\n\n{current_phase.phase_prompt}"
+
+        # Adicionar status das ações rastreadas ao prompt
+        from services.ai.actions import ActionService
+
+        action_statuses = await ActionService.get_tracked_actions_status(
+            bot_id, user_telegram_id
+        )
+
+        if action_statuses:
+            status_text = "\n\nStatus das ações disponíveis:\n"
+            for action_name, status in action_statuses.items():
+                status_text += f"- {action_name}: {status}\n"
+            system_prompt += status_text
 
         messages.append({"role": "system", "content": system_prompt})
 
@@ -376,7 +443,9 @@ class AIConversationService:
                         )
 
                         sender = ManualVerificationSender(bot_token)
-                        await sender.send_manual_verification(offer.id, chat_id)
+                        await sender.send_manual_verification(
+                            offer.id, chat_id, bot_id=bot_id
+                        )
 
                         logger.info(
                             "Manual verification - payment not found, sent manual blocks",

@@ -2,6 +2,7 @@
 Clientes para APIs externas (Telegram, etc)
 """
 
+import json
 import time
 from typing import Any, Dict, Optional
 
@@ -102,131 +103,266 @@ class TelegramAPI:
         self,
         token: str,
         chat_id: int,
-        photo: str,
+        photo,  # Can be str (file_id) or BytesIO (stream)
         caption: Optional[str] = None,
         parse_mode: Optional[str] = None,
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia foto"""
-        payload = {"chat_id": chat_id, "photo": photo}
-        if caption:
-            payload["caption"] = caption
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
+        from io import BytesIO
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.BASE_URL}{token}/sendPhoto",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+        # Check if photo is a BytesIO stream
+        if isinstance(photo, BytesIO):
+            # Use multipart/form-data for file upload
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            # Get filename from stream or use default
+            filename = getattr(photo, "name", "photo.jpg")
+            files = {"photo": (filename, photo, "image/jpeg")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendPhoto",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+        else:
+            # Use JSON for file_id
+            payload = {"chat_id": chat_id, "photo": photo}
+            if caption:
+                payload["caption"] = caption
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendPhoto",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
 
     async def send_video(
         self,
         token: str,
         chat_id: int,
-        video: str,
+        video,  # Can be str (file_id) or BytesIO (stream)
         caption: Optional[str] = None,
         parse_mode: Optional[str] = None,
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia vídeo"""
-        payload = {"chat_id": chat_id, "video": video}
-        if caption:
-            payload["caption"] = caption
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
+        from io import BytesIO
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.BASE_URL}{token}/sendVideo",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+        # Check if video is a BytesIO stream
+        if isinstance(video, BytesIO):
+            # Use multipart/form-data for file upload
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            # Get filename from stream or use default
+            filename = getattr(video, "name", "video.mp4")
+            files = {"video": (filename, video, "video/mp4")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendVideo",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+        else:
+            # Use JSON for file_id
+            payload = {"chat_id": chat_id, "video": video}
+            if caption:
+                payload["caption"] = caption
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendVideo",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
 
     async def send_document(
         self,
         token: str,
         chat_id: int,
-        document: str,
+        document,  # Can be str (file_id) or BytesIO (stream)
         caption: Optional[str] = None,
         parse_mode: Optional[str] = None,
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia documento"""
-        payload = {"chat_id": chat_id, "document": document}
-        if caption:
-            payload["caption"] = caption
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
+        from io import BytesIO
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.BASE_URL}{token}/sendDocument",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+        # Check if document is a BytesIO stream
+        if isinstance(document, BytesIO):
+            # Use multipart/form-data for file upload
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            # Get filename from stream or use default
+            filename = getattr(document, "name", "document.pdf")
+            files = {"document": (filename, document, "application/octet-stream")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendDocument",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+        else:
+            # Use JSON for file_id
+            payload = {"chat_id": chat_id, "document": document}
+            if caption:
+                payload["caption"] = caption
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendDocument",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
 
     async def send_audio(
         self,
         token: str,
         chat_id: int,
-        audio: str,
+        audio,  # Can be str (file_id) or BytesIO (stream)
         caption: Optional[str] = None,
         parse_mode: Optional[str] = None,
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia áudio"""
-        payload = {"chat_id": chat_id, "audio": audio}
-        if caption:
-            payload["caption"] = caption
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
+        from io import BytesIO
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.BASE_URL}{token}/sendAudio",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+        # Check if audio is a BytesIO stream
+        if isinstance(audio, BytesIO):
+            # Use multipart/form-data for file upload
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            # Get filename from stream or use default
+            filename = getattr(audio, "name", "audio.mp3")
+            files = {"audio": (filename, audio, "audio/mpeg")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendAudio",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+        else:
+            # Use JSON for file_id
+            payload = {"chat_id": chat_id, "audio": audio}
+            if caption:
+                payload["caption"] = caption
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendAudio",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
 
     async def send_animation(
         self,
         token: str,
         chat_id: int,
-        animation: str,
+        animation,  # Can be str (file_id) or BytesIO (stream)
         caption: Optional[str] = None,
         parse_mode: Optional[str] = None,
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia GIF/animação"""
-        payload = {"chat_id": chat_id, "animation": animation}
-        if caption:
-            payload["caption"] = caption
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
+        from io import BytesIO
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.BASE_URL}{token}/sendAnimation",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+        # Check if animation is a BytesIO stream
+        if isinstance(animation, BytesIO):
+            # Use multipart/form-data for file upload
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            # Get filename from stream or use default
+            filename = getattr(animation, "name", "animation.gif")
+            files = {"animation": (filename, animation, "image/gif")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendAnimation",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+        else:
+            # Use JSON for file_id
+            payload = {"chat_id": chat_id, "animation": animation}
+            if caption:
+                payload["caption"] = caption
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendAnimation",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
 
     def answer_callback_query_sync(
         self, token: str, callback_query_id: str, text: str = ""

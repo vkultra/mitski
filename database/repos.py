@@ -1633,9 +1633,7 @@ class MediaFileCacheRepository:
     """Repository para cache de file_ids entre bots"""
 
     @staticmethod
-    async def get_cached_file_id(
-        original_file_id: str, bot_id: int
-    ) -> Optional[str]:
+    async def get_cached_file_id(original_file_id: str, bot_id: int) -> Optional[str]:
         """Busca file_id em cache para o bot específico"""
         from .models import MediaFileCache
 
@@ -1686,3 +1684,411 @@ class MediaFileCacheRepository:
                 session.add(cache)
 
             session.commit()
+
+
+class AIActionRepository:
+    """Repository para ações da IA"""
+
+    @staticmethod
+    async def create_action(
+        bot_id: int,
+        action_name: str,
+        track_usage: bool = False,
+        is_active: bool = True,
+    ) -> "AIAction":
+        """Cria nova ação"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            action = AIAction(
+                bot_id=bot_id,
+                action_name=action_name,
+                track_usage=track_usage,
+                is_active=is_active,
+            )
+            session.add(action)
+            session.commit()
+            session.refresh(action)
+            return action
+
+    @staticmethod
+    async def get_action_by_id(action_id: int) -> Optional["AIAction"]:
+        """Busca ação por ID"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            return session.query(AIAction).filter(AIAction.id == action_id).first()
+
+    @staticmethod
+    async def get_action_by_name(bot_id: int, action_name: str) -> Optional["AIAction"]:
+        """Busca ação por nome (trigger)"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIAction)
+                .filter(AIAction.bot_id == bot_id, AIAction.action_name == action_name)
+                .first()
+            )
+
+    @staticmethod
+    async def get_actions_by_bot(
+        bot_id: int, active_only: bool = True
+    ) -> List["AIAction"]:
+        """Lista ações de um bot"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            query = session.query(AIAction).filter(AIAction.bot_id == bot_id)
+            if active_only:
+                query = query.filter(AIAction.is_active == True)
+            return query.order_by(AIAction.created_at.desc()).all()
+
+    @staticmethod
+    async def get_tracked_actions(bot_id: int) -> List["AIAction"]:
+        """Lista apenas ações com rastreamento ativo"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIAction)
+                .filter(
+                    AIAction.bot_id == bot_id,
+                    AIAction.is_active == True,
+                    AIAction.track_usage == True,
+                )
+                .all()
+            )
+
+    @staticmethod
+    async def update_action(action_id: int, **kwargs) -> bool:
+        """Atualiza ação"""
+        from datetime import datetime
+
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            action = session.query(AIAction).filter(AIAction.id == action_id).first()
+            if action:
+                for key, value in kwargs.items():
+                    if hasattr(action, key):
+                        setattr(action, key, value)
+                action.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_action(action_id: int) -> bool:
+        """Deleta ação e seus blocos"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            action = session.query(AIAction).filter(AIAction.id == action_id).first()
+            if action:
+                session.delete(action)
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def get_tracked_actions_sync(bot_id: int) -> List["AIAction"]:
+        """Versão síncrona para workers"""
+        from .models import AIAction
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIAction)
+                .filter(
+                    AIAction.bot_id == bot_id,
+                    AIAction.is_active == True,
+                    AIAction.track_usage == True,
+                )
+                .all()
+            )
+
+
+class AIActionBlockRepository:
+    """Repository para blocos de ação"""
+
+    @staticmethod
+    async def create_block(
+        action_id: int,
+        order: int,
+        text: str = None,
+        media_file_id: str = None,
+        media_type: str = None,
+        delay_seconds: int = 0,
+        auto_delete_seconds: int = 0,
+    ) -> "AIActionBlock":
+        """Cria novo bloco de ação"""
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            block = AIActionBlock(
+                action_id=action_id,
+                order=order,
+                text=text,
+                media_file_id=media_file_id,
+                media_type=media_type,
+                delay_seconds=delay_seconds,
+                auto_delete_seconds=auto_delete_seconds,
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def get_blocks_by_action(action_id: int) -> List["AIActionBlock"]:
+        """Lista blocos de uma ação ordenados"""
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIActionBlock)
+                .filter(AIActionBlock.action_id == action_id)
+                .order_by(AIActionBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int) -> Optional["AIActionBlock"]:
+        """Busca bloco por ID"""
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIActionBlock)
+                .filter(AIActionBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        """Atualiza bloco"""
+        from datetime import datetime
+
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(AIActionBlock)
+                .filter(AIActionBlock.id == block_id)
+                .first()
+            )
+            if block:
+                for key, value in kwargs.items():
+                    if hasattr(block, key):
+                        setattr(block, key, value)
+                block.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_block(block_id: int) -> bool:
+        """Deleta bloco e reordena os restantes"""
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(AIActionBlock)
+                .filter(AIActionBlock.id == block_id)
+                .first()
+            )
+            if block:
+                action_id = block.action_id
+                deleted_order = block.order
+                session.delete(block)
+
+                # Reordenar blocos restantes
+                remaining_blocks = (
+                    session.query(AIActionBlock)
+                    .filter(
+                        AIActionBlock.action_id == action_id,
+                        AIActionBlock.order > deleted_order,
+                    )
+                    .order_by(AIActionBlock.order)
+                    .all()
+                )
+
+                for remaining_block in remaining_blocks:
+                    remaining_block.order -= 1
+
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def get_blocks_by_action_sync(action_id: int) -> List["AIActionBlock"]:
+        """Versão síncrona para workers"""
+        from .models import AIActionBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIActionBlock)
+                .filter(AIActionBlock.action_id == action_id)
+                .order_by(AIActionBlock.order)
+                .all()
+            )
+
+
+class UserActionStatusRepository:
+    """Repository para status de ações por usuário"""
+
+    @staticmethod
+    async def get_or_create_status(
+        bot_id: int,
+        user_telegram_id: int,
+        action_id: int,
+    ) -> "UserActionStatus":
+        """Busca ou cria status de ação para usuário"""
+        from .models import UserActionStatus
+
+        with SessionLocal() as session:
+            status = (
+                session.query(UserActionStatus)
+                .filter(
+                    UserActionStatus.bot_id == bot_id,
+                    UserActionStatus.user_telegram_id == user_telegram_id,
+                    UserActionStatus.action_id == action_id,
+                )
+                .first()
+            )
+
+            if not status:
+                status = UserActionStatus(
+                    bot_id=bot_id,
+                    user_telegram_id=user_telegram_id,
+                    action_id=action_id,
+                    status="INACTIVE",
+                )
+                session.add(status)
+                session.commit()
+                session.refresh(status)
+
+            return status
+
+    @staticmethod
+    async def get_user_action_statuses(
+        bot_id: int,
+        user_telegram_id: int,
+        action_ids: List[int],
+    ) -> dict:
+        """Retorna status de múltiplas ações para um usuário"""
+        from .models import UserActionStatus
+
+        with SessionLocal() as session:
+            statuses = (
+                session.query(UserActionStatus)
+                .filter(
+                    UserActionStatus.bot_id == bot_id,
+                    UserActionStatus.user_telegram_id == user_telegram_id,
+                    UserActionStatus.action_id.in_(action_ids),
+                )
+                .all()
+            )
+
+            # Criar dict com status por action_id
+            status_dict = {s.action_id: s.status for s in statuses}
+
+            # Adicionar INACTIVE para ações sem registro
+            for action_id in action_ids:
+                if action_id not in status_dict:
+                    status_dict[action_id] = "INACTIVE"
+
+            return status_dict
+
+    @staticmethod
+    async def update_status_to_activated(
+        bot_id: int,
+        user_telegram_id: int,
+        action_id: int,
+    ) -> bool:
+        """Atualiza status para ACTIVATED"""
+        from datetime import datetime
+
+        from .models import UserActionStatus
+
+        with SessionLocal() as session:
+            status = (
+                session.query(UserActionStatus)
+                .filter(
+                    UserActionStatus.bot_id == bot_id,
+                    UserActionStatus.user_telegram_id == user_telegram_id,
+                    UserActionStatus.action_id == action_id,
+                )
+                .first()
+            )
+
+            if not status:
+                # Criar novo com status ACTIVATED
+                status = UserActionStatus(
+                    bot_id=bot_id,
+                    user_telegram_id=user_telegram_id,
+                    action_id=action_id,
+                    status="ACTIVATED",
+                    last_triggered_at=datetime.utcnow(),
+                )
+                session.add(status)
+            else:
+                # Atualizar existente
+                status.status = "ACTIVATED"
+                status.last_triggered_at = datetime.utcnow()
+                status.updated_at = datetime.utcnow()
+
+            session.commit()
+            return True
+
+    @staticmethod
+    async def reset_user_statuses(bot_id: int, user_telegram_id: int) -> bool:
+        """Reseta todos os status de ações para INACTIVE"""
+        from datetime import datetime
+
+        from .models import UserActionStatus
+
+        with SessionLocal() as session:
+            statuses = (
+                session.query(UserActionStatus)
+                .filter(
+                    UserActionStatus.bot_id == bot_id,
+                    UserActionStatus.user_telegram_id == user_telegram_id,
+                )
+                .all()
+            )
+
+            for status in statuses:
+                status.status = "INACTIVE"
+                status.updated_at = datetime.utcnow()
+
+            session.commit()
+            return True
+
+    @staticmethod
+    def get_user_action_statuses_sync(
+        bot_id: int,
+        user_telegram_id: int,
+        action_ids: List[int],
+    ) -> dict:
+        """Versão síncrona para workers"""
+        from .models import UserActionStatus
+
+        with SessionLocal() as session:
+            statuses = (
+                session.query(UserActionStatus)
+                .filter(
+                    UserActionStatus.bot_id == bot_id,
+                    UserActionStatus.user_telegram_id == user_telegram_id,
+                    UserActionStatus.action_id.in_(action_ids),
+                )
+                .all()
+            )
+
+            status_dict = {s.action_id: s.status for s in statuses}
+
+            for action_id in action_ids:
+                if action_id not in status_dict:
+                    status_dict[action_id] = "INACTIVE"
+
+            return status_dict

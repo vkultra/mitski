@@ -65,6 +65,18 @@ def process_ai_message(
                 # Remover sufixo da mensagem antes de enviar
                 response_text = re.sub(r"__OFFER_DETECTED:\d+__", "", response_text)
 
+        # Verificar se há ação detectada no sufixo
+        action_id_to_send = None
+        if response_text and "__ACTION_DETECTED:" in response_text:
+            # Extrair ID da ação do sufixo
+            import re
+
+            match = re.search(r"__ACTION_DETECTED:(\d+)__", response_text)
+            if match:
+                action_id_to_send = int(match.group(1))
+                # Remover sufixo da mensagem antes de enviar
+                response_text = re.sub(r"__ACTION_DETECTED:\d+__", "", response_text)
+
         # Enviar resposta (import aqui para evitar circular import)
         from workers.tasks import send_message
 
@@ -79,6 +91,21 @@ def process_ai_message(
                     offer_id=offer_id_to_send,
                     chat_id=user_telegram_id,
                     bot_token=bot_token,
+                    bot_id=bot_id,
+                    user_telegram_id=user_telegram_id,
+                )
+            )
+
+        # Se há ação para enviar, enviar blocos após a mensagem
+        if action_id_to_send:
+            from services.ai.actions import ActionService
+
+            asyncio.run(
+                ActionService.send_action_blocks_after_message(
+                    action_id=action_id_to_send,
+                    chat_id=user_telegram_id,
+                    bot_token=bot_token,
+                    bot_id=bot_id,
                 )
             )
 

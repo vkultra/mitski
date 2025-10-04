@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     func,
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -272,7 +273,7 @@ class PixTransaction(Base):
     # Dados da transação PushinPay
     transaction_id = Column(String(128), nullable=False, unique=True)
     qr_code = Column(String(512), nullable=False)  # Chave PIX copia e cola
-    qr_code_base64 = Column(String(2048))  # QR Code em base64 (opcional)
+    qr_code_base64 = Column(Text)  # QR Code em base64 (sem limite de tamanho)
     value_cents = Column(Integer, nullable=False)  # Valor em centavos
 
     # Status e controle
@@ -348,9 +349,7 @@ class MediaFileCache(Base):
     __tablename__ = "media_file_cache"
 
     id = Column(Integer, primary_key=True)
-    original_file_id = Column(
-        String(256), nullable=False
-    )  # file_id do bot gerenciador
+    original_file_id = Column(String(256), nullable=False)  # file_id do bot gerenciador
     bot_id = Column(
         Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
     )  # bot que vai usar
@@ -361,4 +360,77 @@ class MediaFileCache(Base):
     __table_args__ = (
         Index("idx_media_cache_lookup", "original_file_id", "bot_id"),
         Index("idx_media_cache_bot", "bot_id"),
+    )
+
+
+class AIAction(Base):
+    """Ações da IA com gatilhos personalizados"""
+
+    __tablename__ = "ai_actions"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    action_name = Column(String(128), nullable=False)  # Nome da ação (é o gatilho)
+    track_usage = Column(Boolean, default=False)  # Se rastrear uso INACTIVE/ACTIVATED
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_bot_action_name", "bot_id", "action_name", unique=True),
+        Index("idx_bot_active_actions", "bot_id", "is_active"),
+    )
+
+
+class AIActionBlock(Base):
+    """Blocos de mensagem das ações (sistema de blocos)"""
+
+    __tablename__ = "ai_action_blocks"
+
+    id = Column(Integer, primary_key=True)
+    action_id = Column(
+        Integer, ForeignKey("ai_actions.id", ondelete="CASCADE"), nullable=False
+    )
+    order = Column(Integer, nullable=False)  # Ordem de envio (1, 2, 3...)
+
+    # Conteúdo da mensagem
+    text = Column(String(4096))  # Texto ou legenda
+    media_file_id = Column(String(256))  # file_id do Telegram
+    media_type = Column(String(32))  # 'photo', 'video', 'audio', 'gif', 'document'
+
+    # Efeitos
+    delay_seconds = Column(Integer, default=0)  # Delay antes de enviar
+    auto_delete_seconds = Column(Integer, default=0)  # Auto-deletar após X segundos
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_action_blocks_order", "action_id", "order"),)
+
+
+class UserActionStatus(Base):
+    """Rastreamento de status de ações por usuário"""
+
+    __tablename__ = "user_action_status"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_telegram_id = Column(BigInteger, nullable=False)
+    action_id = Column(
+        Integer, ForeignKey("ai_actions.id", ondelete="CASCADE"), nullable=False
+    )
+    status = Column(String(16), default="INACTIVE")  # INACTIVE ou ACTIVATED
+    last_triggered_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_bot_user_action",
+            "bot_id",
+            "user_telegram_id",
+            "action_id",
+            unique=True,
+        ),
+        Index("idx_action_status", "action_id", "status"),
     )

@@ -151,7 +151,10 @@ class PaymentVerifier:
             # Envia blocos de entregável
             sender = DeliverableSender(decrypt(bot.token))
             await sender.send_deliverable(
-                transaction.offer_id, transaction.chat_id, preview_mode=False, bot_id=bot.id
+                transaction.offer_id,
+                transaction.chat_id,
+                preview_mode=False,
+                bot_id=bot.id,
             )
 
             # Marca como entregue
@@ -241,7 +244,7 @@ class PaymentVerifier:
 
     @staticmethod
     async def send_manual_verification_message(
-        offer_id: int, chat_id: int, bot_token: str
+        offer_id: int, chat_id: int, bot_token: str, bot_id: int = None
     ) -> bool:
         """
         Envia mensagem de verificação manual
@@ -250,6 +253,7 @@ class PaymentVerifier:
             offer_id: ID da oferta
             chat_id: ID do chat
             bot_token: Token do bot
+            bot_id: ID do bot (para cache de mídia)
 
         Returns:
             True se enviou com sucesso
@@ -261,7 +265,7 @@ class PaymentVerifier:
             )
 
             sender = ManualVerificationSender(bot_token)
-            await sender.send_manual_verification(offer_id, chat_id)
+            await sender.send_manual_verification(offer_id, chat_id, bot_id=bot_id)
 
             logger.info(
                 "Manual verification message sent",

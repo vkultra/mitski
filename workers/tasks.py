@@ -38,6 +38,35 @@ def process_telegram_update(self, bot_id: int, update: dict):
 
     text = message.get("text", "")
     photos = message.get("photo", [])
+    chat_id = message.get("chat", {}).get("id", user_id)
+
+    # NOVO: Verificar se é comando de debug primeiro
+    if text and text.startswith("/"):
+        from handlers.debug_commands_router import DebugCommandRouter
+
+        # Tentar processar como comando de debug
+        debug_result = asyncio.run(
+            DebugCommandRouter.route_debug_command(
+                bot_id=bot_id,
+                chat_id=chat_id,
+                user_telegram_id=user_id,
+                text=text,
+                bot_token=decrypt(bot.token),
+            )
+        )
+
+        # Se foi processado como debug, retorna
+        if debug_result:
+            logger.info(
+                "Debug command processed",
+                extra={
+                    "bot_id": bot_id,
+                    "user_id": user_id,
+                    "command": text,
+                    "result": debug_result,
+                },
+            )
+            return
 
     # NOVO: Verifica se bot tem IA ativada
     ai_config = AIConfigRepository.get_by_bot_id_sync(bot_id)
@@ -449,6 +478,91 @@ def process_manager_update(self, update: dict):
             from handlers.gateway import handle_delete_token
 
             response = asyncio.run(handle_delete_token(user_id))
+        # Action menu callbacks
+        elif callback_data.startswith("action_menu:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_menu_handlers import handle_action_menu_click
+
+            response = asyncio.run(handle_action_menu_click(user_id, bot_id))
+        elif callback_data.startswith("action_add:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_menu_handlers import handle_add_action_click
+
+            response = asyncio.run(handle_add_action_click(user_id, bot_id))
+        elif callback_data.startswith("action_edit:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_menu_handlers import handle_action_edit_menu
+
+            response = asyncio.run(handle_action_edit_menu(user_id, action_id))
+        elif callback_data.startswith("action_toggle_track:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_menu_handlers import handle_toggle_track
+
+            response = asyncio.run(handle_toggle_track(user_id, action_id))
+        elif callback_data.startswith("action_block_add:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_menu_handlers import handle_create_action_block
+
+            response = asyncio.run(handle_create_action_block(user_id, action_id))
+        elif callback_data.startswith("action_block_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_crud_handlers import handle_delete_action_block
+
+            response = asyncio.run(handle_delete_action_block(user_id, block_id))
+        elif callback_data.startswith("action_delete:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_crud_handlers import handle_delete_action
+
+            response = asyncio.run(handle_delete_action(user_id, action_id))
+        elif callback_data.startswith("action_delete_confirm:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_crud_handlers import handle_delete_action_confirm
+
+            response = asyncio.run(handle_delete_action_confirm(user_id, action_id))
+        elif callback_data.startswith("action_preview:"):
+            action_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_crud_handlers import handle_preview_action
+
+            response = asyncio.run(handle_preview_action(user_id, action_id))
+        # Action block handlers
+        elif callback_data.startswith("action_block_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import handle_action_block_text_click
+
+            response = asyncio.run(handle_action_block_text_click(user_id, block_id))
+        elif callback_data.startswith("action_block_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import (
+                handle_action_block_media_click,
+            )
+
+            response = asyncio.run(handle_action_block_media_click(user_id, block_id))
+        elif callback_data.startswith("action_block_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import (
+                handle_action_block_effects_click,
+            )
+
+            response = asyncio.run(handle_action_block_effects_click(user_id, block_id))
+        elif callback_data.startswith("action_block_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import (
+                handle_action_block_delay_click,
+            )
+
+            response = asyncio.run(handle_action_block_delay_click(user_id, block_id))
+        elif callback_data.startswith("action_block_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import (
+                handle_action_block_autodel_click,
+            )
+
+            response = asyncio.run(handle_action_block_autodel_click(user_id, block_id))
+        elif callback_data.startswith("action_block_view:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.action_block_handlers import handle_action_block_view
+
+            response = asyncio.run(handle_action_block_view(user_id, block_id))
         elif callback_data == "back_to_main":
             response = asyncio.run(handle_start(user_id))
 
@@ -579,6 +693,46 @@ def process_manager_update(self, update: dict):
 
                     response = asyncio.run(handle_token_input(user_id, text))
 
+                # Action states
+                elif state == "awaiting_action_name":
+                    from handlers.ai.action_menu_handlers import (
+                        handle_action_name_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_action_name_input(user_id, data["bot_id"], text)
+                    )
+                elif state == "awaiting_action_block_text":
+                    from handlers.ai.action_block_handlers import (
+                        handle_action_block_text_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_action_block_text_input(
+                            user_id, data["block_id"], data["action_id"], text
+                        )
+                    )
+                elif state == "awaiting_action_block_delay":
+                    from handlers.ai.action_block_handlers import (
+                        handle_action_block_delay_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_action_block_delay_input(
+                            user_id, data["block_id"], data["action_id"], text
+                        )
+                    )
+                elif state == "awaiting_action_block_autodel":
+                    from handlers.ai.action_block_handlers import (
+                        handle_action_block_autodel_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_action_block_autodel_input(
+                            user_id, data["block_id"], data["action_id"], text
+                        )
+                    )
+
                 elif state == "awaiting_block_text":
                     from handlers.offers import handle_block_text_input
 
@@ -624,6 +778,54 @@ def process_manager_update(self, update: dict):
                                 user_id,
                                 data["block_id"],
                                 data["offer_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Por favor, envie uma mídia (foto, vídeo, áudio, gif ou documento).",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_action_block_media":
+                    # Processar mídia para bloco de ação
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        # Use largest photo
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.ai.action_block_handlers import (
+                            handle_action_block_media_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_action_block_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["action_id"],
                                 media_file_id,
                                 media_type,
                             )

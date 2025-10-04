@@ -59,7 +59,7 @@ class ManualVerificationSender:
                 await asyncio.sleep(block.delay_seconds)
 
             # Enviar mensagem
-            message_id = await self._send_block(block, chat_id)
+            message_id = await self._send_block(block, chat_id, bot_id=bot_id)
 
             if message_id:
                 message_ids.append(message_id)
@@ -84,7 +84,7 @@ class ManualVerificationSender:
         return message_ids
 
     async def _send_block(
-        self, block: "OfferManualVerificationBlock", chat_id: int
+        self, block: "OfferManualVerificationBlock", chat_id: int, bot_id: int = None
     ) -> Optional[int]:
         """
         Envia um bloco individual
@@ -92,6 +92,7 @@ class ManualVerificationSender:
         Args:
             block: Bloco a enviar
             chat_id: ID do chat
+            bot_id: ID do bot (para cache de mídia)
 
         Returns:
             message_id ou None
@@ -104,6 +105,7 @@ class ManualVerificationSender:
                     block.media_file_id,
                     block.media_type,
                     block.text,
+                    bot_id=bot_id,
                 )
 
             # Se tem apenas texto
@@ -135,27 +137,47 @@ class ManualVerificationSender:
         file_id: str,
         media_type: str,
         caption: str = None,
+        bot_id: int = None,
     ) -> Optional[int]:
         """
-        Envia mensagem com mídia
+        Envia mensagem com mídia (com suporte a stream entre bots)
 
         Args:
             chat_id: ID do chat
-            file_id: file_id do Telegram
+            file_id: file_id do Telegram (original do bot gerenciador)
             media_type: Tipo de mídia
             caption: Legenda opcional
+            bot_id: ID do bot secundário (para cache de mídia)
 
         Returns:
             message_id ou None
         """
         result = None
+        file_to_send = file_id
+        file_stream = None
 
         try:
+            # Se tem bot_id, usar sistema de cache/stream
+            if bot_id:
+                from services.media_stream import MediaStreamService
+
+                cached_file_id, stream = await MediaStreamService.get_or_stream_media(
+                    original_file_id=file_id,
+                    bot_id=bot_id,
+                    media_type=media_type,
+                )
+
+                if cached_file_id:
+                    file_to_send = cached_file_id
+                elif stream:
+                    file_stream = stream
+
+            # Enviar mídia
             if media_type == "photo":
                 result = await self.telegram_api.send_photo(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    photo=file_id,
+                    photo=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -164,7 +186,7 @@ class ManualVerificationSender:
                 result = await self.telegram_api.send_video(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    video=file_id,
+                    video=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -173,7 +195,7 @@ class ManualVerificationSender:
                 result = await self.telegram_api.send_audio(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    audio=file_id,
+                    audio=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -182,7 +204,7 @@ class ManualVerificationSender:
                 result = await self.telegram_api.send_document(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    document=file_id,
+                    document=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -191,10 +213,23 @@ class ManualVerificationSender:
                 result = await self.telegram_api.send_animation(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    animation=file_id,
+                    animation=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
+
+            # Se enviou com stream, cachear o novo file_id
+            if result and file_stream and bot_id:
+                new_file_id = self._extract_file_id_from_result(result, media_type)
+                if new_file_id:
+                    from services.media_stream import MediaStreamService
+
+                    await MediaStreamService.cache_media_file_id(
+                        original_file_id=file_id,
+                        bot_id=bot_id,
+                        new_file_id=new_file_id,
+                        media_type=media_type,
+                    )
 
             if result:
                 return result.get("result", {}).get("message_id")
@@ -202,10 +237,48 @@ class ManualVerificationSender:
         except Exception as e:
             logger.error(
                 "Error sending verification media",
-                extra={"chat_id": chat_id, "media_type": media_type, "error": str(e)},
+                extra={
+                    "chat_id": chat_id,
+                    "media_type": media_type,
+                    "used_stream": file_stream is not None,
+                    "error": str(e),
+                },
             )
 
         return None
+
+    def _extract_file_id_from_result(
+        self, result: dict, media_type: str
+    ) -> Optional[str]:
+        """Extrai file_id do resultado da API do Telegram"""
+        try:
+            message = result.get("result", {})
+            type_fields = {
+                "photo": "photo",
+                "video": "video",
+                "audio": "audio",
+                "document": "document",
+                "animation": "animation",
+            }
+
+            field = type_fields.get(media_type)
+            if not field:
+                return None
+
+            if media_type == "photo":
+                photos = message.get("photo", [])
+                if photos:
+                    return photos[-1].get("file_id")
+            else:
+                media_obj = message.get(field, {})
+                return media_obj.get("file_id")
+
+        except Exception as e:
+            logger.error(
+                "Error extracting file_id from result",
+                extra={"media_type": media_type, "error": str(e)},
+            )
+            return None
 
     async def _auto_delete_message(
         self, chat_id: int, message_id: int, delay_seconds: int
