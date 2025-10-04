@@ -90,6 +90,20 @@ async def handle_bot_selected_for_ai(user_id: int, bot_id: int) -> Dict[str, Any
             ],
             [
                 {
+                    "text": "💰 Ofertas",
+                    "callback_data": f"offer_menu:{bot_id}",
+                },
+                {
+                    "text": "⚡ Ações",
+                    "callback_data": f"action_menu:{bot_id}",
+                },
+                {
+                    "text": "🔄 Recuperação",
+                    "callback_data": f"recovery_menu:{bot_id}",
+                },
+            ],
+            [
+                {
                     "text": f"🔄 Modelo: {model_label}",
                     "callback_data": f"ai_toggle_model:{bot_id}",
                 }

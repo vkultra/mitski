@@ -53,10 +53,34 @@ def process_ai_message(
             )
         )
 
+        # Verificar se há oferta detectada no sufixo
+        offer_id_to_send = None
+        if response_text and "__OFFER_DETECTED:" in response_text:
+            # Extrair ID da oferta do sufixo
+            import re
+
+            match = re.search(r"__OFFER_DETECTED:(\d+)__", response_text)
+            if match:
+                offer_id_to_send = int(match.group(1))
+                # Remover sufixo da mensagem antes de enviar
+                response_text = re.sub(r"__OFFER_DETECTED:\d+__", "", response_text)
+
         # Enviar resposta (import aqui para evitar circular import)
         from workers.tasks import send_message
 
         send_message.delay(bot_id, user_telegram_id, response_text)
+
+        # Se há oferta para enviar, enviar pitch após a mensagem
+        if offer_id_to_send:
+            from services.offers.offer_service import OfferService
+
+            asyncio.run(
+                OfferService.send_pitch_after_message(
+                    offer_id=offer_id_to_send,
+                    chat_id=user_telegram_id,
+                    bot_token=bot_token,
+                )
+            )
 
         logger.info(
             "AI message processed successfully",

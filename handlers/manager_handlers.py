@@ -23,9 +23,12 @@ async def handle_start(user_id: int) -> Dict[str, Any]:
             [{"text": "➕ Adicionar Bot", "callback_data": "add_bot"}],
             [
                 {"text": "🤖 IA", "callback_data": "ai_menu"},
-                {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
+                {"text": "💳 Gateway", "callback_data": "gateway_menu"},
             ],
-            [{"text": "📋 Listar Bots", "callback_data": "list_bots"}],
+            [
+                {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
+                {"text": "📋 Listar Bots", "callback_data": "list_bots"},
+            ],
         ]
     }
 

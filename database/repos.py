@@ -5,7 +5,7 @@ Repository Pattern para acesso ao banco
 import os
 from typing import List, Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from core.telemetry import logger
@@ -74,6 +74,41 @@ class BotRepository:
                 session.commit()
                 return True
             return False
+
+    @staticmethod
+    async def associate_offer(bot_id: int, offer_id: int) -> bool:
+        """Associa oferta ao bot (1 bot = 1 oferta)"""
+        from datetime import datetime
+
+        with SessionLocal() as session:
+            bot = session.query(Bot).filter(Bot.id == bot_id).first()
+            if bot:
+                bot.associated_offer_id = offer_id
+                bot.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def dissociate_offer(bot_id: int) -> bool:
+        """Remove associação de oferta do bot"""
+        from datetime import datetime
+
+        with SessionLocal() as session:
+            bot = session.query(Bot).filter(Bot.id == bot_id).first()
+            if bot:
+                bot.associated_offer_id = None
+                bot.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def get_associated_offer_id(bot_id: int) -> Optional[int]:
+        """Retorna ID da oferta associada ao bot"""
+        with SessionLocal() as session:
+            bot = session.query(Bot).filter(Bot.id == bot_id).first()
+            return bot.associated_offer_id if bot else None
 
 
 class UserRepository:
@@ -706,6 +741,889 @@ class UserAISessionRepository:
                 ai_session.current_phase_id = None
                 ai_session.message_count = 0
                 ai_session.last_interaction = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+
+class OfferRepository:
+    """Repository para ofertas"""
+
+    @staticmethod
+    async def create_offer(bot_id: int, name: str, value: str = None) -> "Offer":
+        """Cria nova oferta"""
+        from .models import Offer
+
+        with SessionLocal() as session:
+            offer = Offer(bot_id=bot_id, name=name, value=value, is_active=True)
+            session.add(offer)
+            session.commit()
+            session.refresh(offer)
+            return offer
+
+    @staticmethod
+    async def get_offer_by_id(offer_id: int) -> "Offer":
+        """Busca oferta por ID"""
+        from .models import Offer
+
+        with SessionLocal() as session:
+            return session.query(Offer).filter(Offer.id == offer_id).first()
+
+    @staticmethod
+    async def get_offer_by_name(bot_id: int, name: str) -> "Offer":
+        """Busca oferta por nome (case-insensitive)"""
+        from .models import Offer
+
+        with SessionLocal() as session:
+            return (
+                session.query(Offer)
+                .filter(
+                    Offer.bot_id == bot_id,
+                    func.lower(Offer.name) == name.lower(),
+                    Offer.is_active == True,
+                )
+                .first()
+            )
+
+    @staticmethod
+    async def get_offers_by_bot(bot_id: int, active_only: bool = True) -> List["Offer"]:
+        """Lista ofertas de um bot"""
+        from .models import Offer
+
+        with SessionLocal() as session:
+            query = session.query(Offer).filter(Offer.bot_id == bot_id)
+            if active_only:
+                query = query.filter(Offer.is_active == True)
+            return query.order_by(Offer.created_at.desc()).all()
+
+    @staticmethod
+    async def update_offer(offer_id: int, **kwargs) -> bool:
+        """Atualiza oferta"""
+        from datetime import datetime
+
+        from .models import Offer
+
+        with SessionLocal() as session:
+            offer = session.query(Offer).filter(Offer.id == offer_id).first()
+            if offer:
+                for key, value in kwargs.items():
+                    if hasattr(offer, key):
+                        setattr(offer, key, value)
+                offer.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_offer(offer_id: int) -> bool:
+        """Deleta oferta (soft delete)"""
+        return await OfferRepository.update_offer(offer_id, is_active=False)
+
+    @staticmethod
+    def get_offer_by_id_sync(offer_id: int) -> "Offer":
+        """Versão síncrona para Celery"""
+        from .models import Offer
+
+        with SessionLocal() as session:
+            return session.query(Offer).filter(Offer.id == offer_id).first()
+
+
+class OfferPitchRepository:
+    """Repository para blocos do pitch de vendas"""
+
+    @staticmethod
+    async def create_block(
+        offer_id: int,
+        order: int,
+        text: str = None,
+        media_file_id: str = None,
+        media_type: str = None,
+        delay_seconds: int = 0,
+        auto_delete_seconds: int = 0,
+    ) -> "OfferPitchBlock":
+        """Cria novo bloco do pitch"""
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            block = OfferPitchBlock(
+                offer_id=offer_id,
+                order=order,
+                text=text,
+                media_file_id=media_file_id,
+                media_type=media_type,
+                delay_seconds=delay_seconds,
+                auto_delete_seconds=auto_delete_seconds,
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def get_blocks_by_offer(offer_id: int) -> List["OfferPitchBlock"]:
+        """Lista blocos de uma oferta ordenados"""
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferPitchBlock)
+                .filter(OfferPitchBlock.offer_id == offer_id)
+                .order_by(OfferPitchBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int) -> "OfferPitchBlock":
+        """Busca bloco por ID"""
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferPitchBlock)
+                .filter(OfferPitchBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        """Atualiza bloco"""
+        from datetime import datetime
+
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferPitchBlock)
+                .filter(OfferPitchBlock.id == block_id)
+                .first()
+            )
+            if block:
+                for key, value in kwargs.items():
+                    if hasattr(block, key):
+                        setattr(block, key, value)
+                block.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_block(block_id: int) -> bool:
+        """Deleta bloco e reordena os restantes"""
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferPitchBlock)
+                .filter(OfferPitchBlock.id == block_id)
+                .first()
+            )
+            if block:
+                offer_id = block.offer_id
+                deleted_order = block.order
+                session.delete(block)
+
+                # Reordenar blocos restantes
+                remaining_blocks = (
+                    session.query(OfferPitchBlock)
+                    .filter(
+                        OfferPitchBlock.offer_id == offer_id,
+                        OfferPitchBlock.order > deleted_order,
+                    )
+                    .order_by(OfferPitchBlock.order)
+                    .all()
+                )
+
+                for remaining_block in remaining_blocks:
+                    remaining_block.order -= 1
+
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def get_blocks_by_offer_sync(offer_id: int) -> List["OfferPitchBlock"]:
+        """Versão síncrona para Celery"""
+        from .models import OfferPitchBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferPitchBlock)
+                .filter(OfferPitchBlock.offer_id == offer_id)
+                .order_by(OfferPitchBlock.order)
+                .all()
+            )
+
+
+class OfferDeliverableRepository:
+    """Repository para entregáveis de ofertas"""
+
+    @staticmethod
+    async def create_deliverable(
+        offer_id: int, content: str, deliverable_type: str = None
+    ) -> "OfferDeliverable":
+        """Cria novo entregável"""
+        from .models import OfferDeliverable
+
+        with SessionLocal() as session:
+            deliverable = OfferDeliverable(
+                offer_id=offer_id, content=content, type=deliverable_type
+            )
+            session.add(deliverable)
+            session.commit()
+            session.refresh(deliverable)
+            return deliverable
+
+    @staticmethod
+    async def get_deliverables_by_offer(offer_id: int) -> List["OfferDeliverable"]:
+        """Lista entregáveis de uma oferta"""
+        from .models import OfferDeliverable
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDeliverable)
+                .filter(OfferDeliverable.offer_id == offer_id)
+                .all()
+            )
+
+    @staticmethod
+    async def get_deliverable_by_id(deliverable_id: int) -> "OfferDeliverable":
+        """Busca entregável por ID"""
+        from .models import OfferDeliverable
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDeliverable)
+                .filter(OfferDeliverable.id == deliverable_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_deliverable(deliverable_id: int, **kwargs) -> bool:
+        """Atualiza entregável"""
+        from datetime import datetime
+
+        from .models import OfferDeliverable
+
+        with SessionLocal() as session:
+            deliverable = (
+                session.query(OfferDeliverable)
+                .filter(OfferDeliverable.id == deliverable_id)
+                .first()
+            )
+            if deliverable:
+                for key, value in kwargs.items():
+                    if hasattr(deliverable, key):
+                        setattr(deliverable, key, value)
+                deliverable.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_deliverable(deliverable_id: int) -> bool:
+        """Deleta entregável"""
+        from .models import OfferDeliverable
+
+        with SessionLocal() as session:
+            deliverable = (
+                session.query(OfferDeliverable)
+                .filter(OfferDeliverable.id == deliverable_id)
+                .first()
+            )
+            if deliverable:
+                session.delete(deliverable)
+                session.commit()
+                return True
+            return False
+
+
+class GatewayConfigRepository:
+    """Repository para configurações de gateway"""
+
+    @staticmethod
+    async def get_by_admin_id(admin_id: int, gateway_type: str = "pushinpay"):
+        """Busca configuração de gateway por admin_id"""
+        from .models import GatewayConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(GatewayConfig)
+                .filter(
+                    GatewayConfig.admin_id == admin_id,
+                    GatewayConfig.gateway_type == gateway_type,
+                    GatewayConfig.is_active == True,  # noqa: E712
+                )
+                .first()
+            )
+
+    @staticmethod
+    def get_by_admin_id_sync(admin_id: int, gateway_type: str = "pushinpay"):
+        """Busca config de gateway (sync para workers)"""
+        from .models import GatewayConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(GatewayConfig)
+                .filter(
+                    GatewayConfig.admin_id == admin_id,
+                    GatewayConfig.gateway_type == gateway_type,
+                    GatewayConfig.is_active == True,  # noqa: E712
+                )
+                .first()
+            )
+
+    @staticmethod
+    async def create_config(admin_id: int, gateway_type: str, encrypted_token: bytes):
+        """Cria nova configuração de gateway"""
+        from .models import GatewayConfig
+
+        with SessionLocal() as session:
+            config = GatewayConfig(
+                admin_id=admin_id,
+                gateway_type=gateway_type,
+                encrypted_token=encrypted_token,
+                is_active=True,
+            )
+            session.add(config)
+            session.commit()
+            session.refresh(config)
+            return config
+
+    @staticmethod
+    async def update_token(admin_id: int, gateway_type: str, encrypted_token: bytes):
+        """Atualiza token do gateway"""
+        from datetime import datetime
+
+        from .models import GatewayConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(GatewayConfig)
+                .filter(
+                    GatewayConfig.admin_id == admin_id,
+                    GatewayConfig.gateway_type == gateway_type,
+                )
+                .first()
+            )
+            if config:
+                config.encrypted_token = encrypted_token
+                config.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_config(admin_id: int, gateway_type: str) -> bool:
+        """Deleta configuração de gateway"""
+        from .models import GatewayConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(GatewayConfig)
+                .filter(
+                    GatewayConfig.admin_id == admin_id,
+                    GatewayConfig.gateway_type == gateway_type,
+                )
+                .first()
+            )
+            if config:
+                session.delete(config)
+                session.commit()
+                return True
+            return False
+
+
+class BotGatewayConfigRepository:
+    """Repository para configurações de gateway por bot"""
+
+    @staticmethod
+    async def get_by_bot_id(bot_id: int, gateway_type: str = "pushinpay"):
+        """Busca configuração de gateway por bot_id"""
+        from .models import BotGatewayConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(BotGatewayConfig)
+                .filter(
+                    BotGatewayConfig.bot_id == bot_id,
+                    BotGatewayConfig.gateway_type == gateway_type,
+                    BotGatewayConfig.is_active == True,  # noqa: E712
+                )
+                .first()
+            )
+
+    @staticmethod
+    def get_by_bot_id_sync(bot_id: int, gateway_type: str = "pushinpay"):
+        """Busca config de gateway por bot (sync para workers)"""
+        from .models import BotGatewayConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(BotGatewayConfig)
+                .filter(
+                    BotGatewayConfig.bot_id == bot_id,
+                    BotGatewayConfig.gateway_type == gateway_type,
+                    BotGatewayConfig.is_active == True,  # noqa: E712
+                )
+                .first()
+            )
+
+    @staticmethod
+    async def create_config(bot_id: int, gateway_type: str, encrypted_token: bytes):
+        """Cria nova configuração de gateway para bot"""
+        from .models import BotGatewayConfig
+
+        with SessionLocal() as session:
+            config = BotGatewayConfig(
+                bot_id=bot_id,
+                gateway_type=gateway_type,
+                encrypted_token=encrypted_token,
+                is_active=True,
+            )
+            session.add(config)
+            session.commit()
+            session.refresh(config)
+            return config
+
+    @staticmethod
+    async def update_token(bot_id: int, gateway_type: str, encrypted_token: bytes):
+        """Atualiza token do gateway para bot"""
+        from datetime import datetime
+
+        from .models import BotGatewayConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(BotGatewayConfig)
+                .filter(
+                    BotGatewayConfig.bot_id == bot_id,
+                    BotGatewayConfig.gateway_type == gateway_type,
+                )
+                .first()
+            )
+            if config:
+                config.encrypted_token = encrypted_token
+                config.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_config(bot_id: int, gateway_type: str) -> bool:
+        """Deleta configuração de gateway do bot"""
+        from .models import BotGatewayConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(BotGatewayConfig)
+                .filter(
+                    BotGatewayConfig.bot_id == bot_id,
+                    BotGatewayConfig.gateway_type == gateway_type,
+                )
+                .first()
+            )
+            if config:
+                session.delete(config)
+                session.commit()
+                return True
+            return False
+
+
+class PixTransactionRepository:
+    """Repository para transações PIX"""
+
+    @staticmethod
+    async def create_transaction(
+        bot_id: int,
+        user_telegram_id: int,
+        chat_id: int,
+        offer_id: int,
+        transaction_id: str,
+        qr_code: str,
+        value_cents: int,
+        qr_code_base64: str = None,
+    ):
+        """Cria nova transação PIX"""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = PixTransaction(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                chat_id=chat_id,
+                offer_id=offer_id,
+                transaction_id=transaction_id,
+                qr_code=qr_code,
+                qr_code_base64=qr_code_base64,
+                value_cents=value_cents,
+                status="created",
+            )
+            session.add(transaction)
+            session.commit()
+            session.refresh(transaction)
+            return transaction
+
+    @staticmethod
+    async def get_by_id(pix_id: int):
+        """Busca transação por ID"""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+
+    @staticmethod
+    def get_by_id_sync(pix_id: int):
+        """Busca transação por ID (sync para workers)"""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+
+    @staticmethod
+    async def get_by_transaction_id(transaction_id: str):
+        """Busca transação por transaction_id do PushinPay"""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(PixTransaction.transaction_id == transaction_id)
+                .first()
+            )
+
+    @staticmethod
+    async def get_latest_unpaid_by_chat(chat_id: int):
+        """Busca última transação não paga de um chat"""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(
+                    PixTransaction.chat_id == chat_id,
+                    PixTransaction.status == "created",
+                    PixTransaction.delivered_at == None,  # noqa: E711
+                )
+                .order_by(PixTransaction.created_at.desc())
+                .first()
+            )
+
+    @staticmethod
+    def get_pending_for_verification_sync(limit_minutes: int = 10):
+        """Busca transações pendentes para verificação (sync para workers)"""
+        from datetime import datetime, timedelta
+
+        from .models import PixTransaction
+
+        cutoff_time = datetime.utcnow() - timedelta(minutes=limit_minutes)
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(
+                    PixTransaction.status == "created",
+                    PixTransaction.created_at >= cutoff_time,
+                )
+                .all()
+            )
+
+    @staticmethod
+    async def update_status(pix_id: int, status: str) -> bool:
+        """Atualiza status da transação"""
+        from datetime import datetime
+
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+            if transaction:
+                transaction.status = status
+                transaction.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def update_status_sync(pix_id: int, status: str) -> bool:
+        """Atualiza status (sync para workers)"""
+        from datetime import datetime
+
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+            if transaction:
+                transaction.status = status
+                transaction.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def mark_delivered(pix_id: int) -> bool:
+        """Marca transação como entregue"""
+        from datetime import datetime
+
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+            if transaction:
+                transaction.delivered_at = datetime.utcnow()
+                transaction.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def mark_delivered_sync(pix_id: int) -> bool:
+        """Marca como entregue (sync para workers)"""
+        from datetime import datetime
+
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == pix_id)
+                .first()
+            )
+            if transaction:
+                transaction.delivered_at = datetime.utcnow()
+                transaction.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    def get_pending_by_user_and_offer_sync(
+        bot_id: int, user_telegram_id: int, offer_id: int, minutes_ago: int = 15
+    ) -> List:
+        """Busca transações PIX pendentes de um usuário em uma oferta"""
+        from datetime import datetime, timedelta
+
+        from .models import PixTransaction
+
+        cutoff_time = datetime.utcnow() - timedelta(minutes=minutes_ago)
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(
+                    PixTransaction.bot_id == bot_id,
+                    PixTransaction.user_telegram_id == user_telegram_id,
+                    PixTransaction.offer_id == offer_id,
+                    PixTransaction.created_at >= cutoff_time,
+                    PixTransaction.status.in_(["created", "pending"]),
+                )
+                .order_by(PixTransaction.created_at.desc())
+                .all()
+            )
+
+
+class OfferDeliverableBlockRepository:
+    """Repository para blocos de entregável"""
+
+    @staticmethod
+    async def create_block(offer_id: int, order: int, **kwargs):
+        """Cria novo bloco de entregável"""
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            block = OfferDeliverableBlock(offer_id=offer_id, order=order, **kwargs)
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def get_blocks_by_offer(offer_id: int) -> List:
+        """Lista blocos de um entregável"""
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDeliverableBlock)
+                .filter(OfferDeliverableBlock.offer_id == offer_id)
+                .order_by(OfferDeliverableBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    def get_blocks_by_offer_sync(offer_id: int) -> List:
+        """Lista blocos (sync para workers)"""
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDeliverableBlock)
+                .filter(OfferDeliverableBlock.offer_id == offer_id)
+                .order_by(OfferDeliverableBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int):
+        """Busca bloco por ID"""
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDeliverableBlock)
+                .filter(OfferDeliverableBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        """Atualiza bloco"""
+        from datetime import datetime
+
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferDeliverableBlock)
+                .filter(OfferDeliverableBlock.id == block_id)
+                .first()
+            )
+            if block:
+                for key, value in kwargs.items():
+                    if hasattr(block, key):
+                        setattr(block, key, value)
+                block.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_block(block_id: int) -> bool:
+        """Deleta bloco"""
+        from .models import OfferDeliverableBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferDeliverableBlock)
+                .filter(OfferDeliverableBlock.id == block_id)
+                .first()
+            )
+            if block:
+                session.delete(block)
+                session.commit()
+                return True
+            return False
+
+
+class OfferManualVerificationBlockRepository:
+    """Repository para blocos de verificação manual"""
+
+    @staticmethod
+    async def create_block(offer_id: int, order: int, **kwargs):
+        """Cria novo bloco de verificação manual"""
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            block = OfferManualVerificationBlock(
+                offer_id=offer_id, order=order, **kwargs
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def get_blocks_by_offer(offer_id: int) -> List:
+        """Lista blocos de verificação manual"""
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferManualVerificationBlock)
+                .filter(OfferManualVerificationBlock.offer_id == offer_id)
+                .order_by(OfferManualVerificationBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    def get_blocks_by_offer_sync(offer_id: int) -> List:
+        """Lista blocos (sync para workers)"""
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferManualVerificationBlock)
+                .filter(OfferManualVerificationBlock.offer_id == offer_id)
+                .order_by(OfferManualVerificationBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int):
+        """Busca bloco por ID"""
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferManualVerificationBlock)
+                .filter(OfferManualVerificationBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        """Atualiza bloco"""
+        from datetime import datetime
+
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferManualVerificationBlock)
+                .filter(OfferManualVerificationBlock.id == block_id)
+                .first()
+            )
+            if block:
+                for key, value in kwargs.items():
+                    if hasattr(block, key):
+                        setattr(block, key, value)
+                block.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_block(block_id: int) -> bool:
+        """Deleta bloco"""
+        from .models import OfferManualVerificationBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferManualVerificationBlock)
+                .filter(OfferManualVerificationBlock.id == block_id)
+                .first()
+            )
+            if block:
+                session.delete(block)
                 session.commit()
                 return True
             return False

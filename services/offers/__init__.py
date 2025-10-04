@@ -1,0 +1,3 @@
+"""
+Serviços de ofertas
+"""

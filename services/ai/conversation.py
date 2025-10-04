@@ -208,6 +208,58 @@ class AIConversationService:
             },
         )
 
+        # 13. Verificar se há ofertas na resposta da IA
+        from services.offers.offer_service import OfferService
+
+        offer_result = await OfferService.process_ai_message_for_offers(
+            bot_id=bot_id,
+            chat_id=user_telegram_id,
+            ai_message=answer,
+            bot_token=bot_token,
+        )
+
+        # Se uma oferta foi detectada e deve substituir a mensagem
+        if offer_result and offer_result.get("replaced_message"):
+            logger.info(
+                "Offer replaced AI message",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "offer_id": offer_result.get("offer_id"),
+                    "offer_name": offer_result.get("offer_name"),
+                },
+            )
+            # Retornar None para indicar que a mensagem foi substituída
+            return None
+
+        # Se deve adicionar pitch após a mensagem, adicionar marcador
+        # Será processado em ai_tasks.py para evitar enviar o sufixo ao usuário
+        if offer_result and offer_result.get("should_append_pitch"):
+            answer = f"{answer}__OFFER_DETECTED:{offer_result['offer_id']}__"
+
+        # 14. Verificar se a IA enviou termo de verificação manual
+        from services.gateway.payment_verifier import PaymentVerifier
+
+        manual_verify_result = (
+            await AIConversationService._check_manual_verification_trigger(
+                bot_id=bot_id,
+                chat_id=user_telegram_id,
+                ai_message=answer,
+                bot_token=bot_token,
+            )
+        )
+
+        if manual_verify_result and manual_verify_result.get("triggered"):
+            logger.info(
+                "Manual verification triggered by AI",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "offer_id": manual_verify_result.get("offer_id"),
+                    "trigger": manual_verify_result.get("trigger"),
+                },
+            )
+
         return answer
 
     @staticmethod
@@ -238,3 +290,118 @@ class AIConversationService:
         messages.append(user_message)
 
         return messages
+
+    @staticmethod
+    async def _check_manual_verification_trigger(
+        bot_id: int, chat_id: int, ai_message: str, bot_token: str
+    ) -> Dict[str, Any]:
+        """
+        Verifica se a mensagem da IA contém termo de verificação manual de alguma oferta
+
+        Args:
+            bot_id: ID do bot
+            chat_id: ID do chat
+            ai_message: Mensagem da IA
+            bot_token: Token do bot
+
+        Returns:
+            Dict com {triggered: bool, offer_id: int, trigger: str, payment_found: bool}
+        """
+        from database.repos import OfferRepository, PixTransactionRepository
+
+        # Buscar ofertas com termo de verificação configurado
+        offers = await OfferRepository.get_offers_by_bot(bot_id, active_only=True)
+
+        for offer in offers:
+            if not offer.manual_verification_trigger:
+                continue
+
+            # Verificar se o termo está na mensagem da IA (case-insensitive)
+            if offer.manual_verification_trigger.lower() in ai_message.lower():
+                logger.info(
+                    "Manual verification trigger detected",
+                    extra={
+                        "bot_id": bot_id,
+                        "chat_id": chat_id,
+                        "offer_id": offer.id,
+                        "trigger": offer.manual_verification_trigger,
+                    },
+                )
+
+                # Buscar transações PIX pendentes deste usuário nesta oferta
+                # (criadas nos últimos 15 minutos)
+                pending_transactions = (
+                    PixTransactionRepository.get_pending_by_user_and_offer_sync(
+                        bot_id=bot_id,
+                        user_telegram_id=chat_id,
+                        offer_id=offer.id,
+                        minutes_ago=15,
+                    )
+                )
+
+                if pending_transactions:
+                    # Há transação pendente - verificar pagamento
+                    from services.gateway.payment_verifier import PaymentVerifier
+
+                    transaction = pending_transactions[0]
+
+                    # Verificar status via API
+                    payment_status = await PaymentVerifier.verify_payment(
+                        transaction.id
+                    )
+
+                    if payment_status.get("status") == "paid":
+                        # Pagamento encontrado - entregar conteúdo
+                        await PaymentVerifier.deliver_content(transaction.id)
+
+                        logger.info(
+                            "Manual verification - payment found and delivered",
+                            extra={
+                                "bot_id": bot_id,
+                                "transaction_id": transaction.id,
+                                "offer_id": offer.id,
+                            },
+                        )
+
+                        return {
+                            "triggered": True,
+                            "offer_id": offer.id,
+                            "trigger": offer.manual_verification_trigger,
+                            "payment_found": True,
+                        }
+                    else:
+                        # Pagamento não encontrado - enviar blocos de verificação manual
+                        from services.offers.manual_verification_sender import (
+                            ManualVerificationSender,
+                        )
+
+                        sender = ManualVerificationSender(bot_token)
+                        await sender.send_manual_verification(offer.id, chat_id)
+
+                        logger.info(
+                            "Manual verification - payment not found, sent manual blocks",
+                            extra={
+                                "bot_id": bot_id,
+                                "transaction_id": transaction.id,
+                                "offer_id": offer.id,
+                            },
+                        )
+
+                        return {
+                            "triggered": True,
+                            "offer_id": offer.id,
+                            "trigger": offer.manual_verification_trigger,
+                            "payment_found": False,
+                        }
+                else:
+                    # Não há transação pendente
+                    logger.info(
+                        "Manual verification triggered but no pending transaction",
+                        extra={
+                            "bot_id": bot_id,
+                            "chat_id": chat_id,
+                            "offer_id": offer.id,
+                        },
+                    )
+
+        return {"triggered": False}

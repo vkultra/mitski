@@ -159,6 +159,296 @@ def process_manager_update(self, update: dict):
         elif callback_data.startswith("ai_delete_phase:"):
             phase_id = int(callback_data.split(":")[1])
             response = asyncio.run(handle_delete_phase(user_id, phase_id))
+        # Offer menu callbacks
+        elif callback_data == "noop":
+            # Callback que não faz nada (usado em botões informativos)
+            response = None
+        elif callback_data.startswith("offer_menu_page:"):
+            parts = callback_data.split(":")
+            bot_id = int(parts[1])
+            page = int(parts[2])
+            from handlers.offers import handle_offer_menu
+
+            response = asyncio.run(handle_offer_menu(user_id, bot_id, page=page))
+        elif callback_data.startswith("offer_menu:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_menu
+
+            response = asyncio.run(handle_offer_menu(user_id, bot_id))
+        elif callback_data.startswith("offer_create:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_create_offer
+
+            response = asyncio.run(handle_create_offer(user_id, bot_id))
+        elif callback_data.startswith("offer_list:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_list_offers
+
+            response = asyncio.run(handle_list_offers(user_id, bot_id))
+        elif callback_data.startswith("offer_list_delete:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_list_offers_delete
+
+            response = asyncio.run(handle_list_offers_delete(user_id, bot_id))
+        elif callback_data.startswith("offer_associate:"):
+            parts = callback_data.split(":")
+            bot_id = int(parts[1])
+            offer_id = int(parts[2])
+            from handlers.offers import handle_associate_offer
+
+            response = asyncio.run(handle_associate_offer(user_id, bot_id, offer_id))
+        elif callback_data.startswith("offer_dissociate:"):
+            parts = callback_data.split(":")
+            bot_id = int(parts[1])
+            offer_id = int(parts[2])
+            from handlers.offers import handle_dissociate_offer
+
+            response = asyncio.run(handle_dissociate_offer(user_id, bot_id, offer_id))
+        elif callback_data.startswith("offer_pitch:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_pitch_menu
+
+            response = asyncio.run(handle_offer_pitch_menu(user_id, offer_id))
+        elif callback_data.startswith("pitch_add:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_create_pitch_block
+
+            response = asyncio.run(handle_create_pitch_block(user_id, offer_id))
+        elif callback_data.startswith("pitch_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_block_text_click
+
+            response = asyncio.run(handle_block_text_click(user_id, block_id))
+        elif callback_data.startswith("pitch_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_block_media_click
+
+            response = asyncio.run(handle_block_media_click(user_id, block_id))
+        elif callback_data.startswith("pitch_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_block_effects_click
+
+            response = asyncio.run(handle_block_effects_click(user_id, block_id))
+        elif callback_data.startswith("pitch_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_block_delay_click
+
+            response = asyncio.run(handle_block_delay_click(user_id, block_id))
+        elif callback_data.startswith("pitch_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_block_autodel_click
+
+            response = asyncio.run(handle_block_autodel_click(user_id, block_id))
+        elif callback_data.startswith("pitch_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_block
+
+            response = asyncio.run(handle_delete_block(user_id, block_id))
+        elif callback_data.startswith("pitch_preview:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_preview_pitch
+
+            response = asyncio.run(handle_preview_pitch(user_id, offer_id))
+        # Deliverable block routes
+        elif callback_data.startswith("deliv_blocks:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_blocks_menu
+
+            response = asyncio.run(handle_deliverable_blocks_menu(user_id, offer_id))
+        elif callback_data.startswith("deliv_block_add:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_create_deliverable_block
+
+            response = asyncio.run(handle_create_deliverable_block(user_id, offer_id))
+        elif callback_data.startswith("deliv_block_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_block_text_click
+
+            response = asyncio.run(
+                handle_deliverable_block_text_click(user_id, block_id)
+            )
+        elif callback_data.startswith("deliv_block_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_block_media_click
+
+            response = asyncio.run(
+                handle_deliverable_block_media_click(user_id, block_id)
+            )
+        elif callback_data.startswith("deliv_block_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_block_effects_click
+
+            response = asyncio.run(
+                handle_deliverable_block_effects_click(user_id, block_id)
+            )
+        elif callback_data.startswith("deliv_block_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_block_delay_click
+
+            response = asyncio.run(
+                handle_deliverable_block_delay_click(user_id, block_id)
+            )
+        elif callback_data.startswith("deliv_block_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_deliverable_block_autodel_click
+
+            response = asyncio.run(
+                handle_deliverable_block_autodel_click(user_id, block_id)
+            )
+        elif callback_data.startswith("deliv_block_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_deliverable_block
+
+            response = asyncio.run(handle_delete_deliverable_block(user_id, block_id))
+        elif callback_data.startswith("deliv_block_preview:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_preview_deliverable
+
+            response = asyncio.run(handle_preview_deliverable(user_id, offer_id))
+        # Manual verification routes
+        elif callback_data.startswith("manver_menu:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_menu
+
+            response = asyncio.run(handle_manual_verification_menu(user_id, offer_id))
+        elif callback_data.startswith("manver_set_trigger:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_set_verification_trigger
+
+            response = asyncio.run(handle_set_verification_trigger(user_id, offer_id))
+        elif callback_data.startswith("manver_block_add:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_create_manual_verification_block
+
+            response = asyncio.run(
+                handle_create_manual_verification_block(user_id, offer_id)
+            )
+        elif callback_data.startswith("manver_block_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_block_text_click
+
+            response = asyncio.run(
+                handle_manual_verification_block_text_click(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_block_media_click
+
+            response = asyncio.run(
+                handle_manual_verification_block_media_click(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_block_effects_click
+
+            response = asyncio.run(
+                handle_manual_verification_block_effects_click(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_block_delay_click
+
+            response = asyncio.run(
+                handle_manual_verification_block_delay_click(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_manual_verification_block_autodel_click
+
+            response = asyncio.run(
+                handle_manual_verification_block_autodel_click(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_manual_verification_block
+
+            response = asyncio.run(
+                handle_delete_manual_verification_block(user_id, block_id)
+            )
+        elif callback_data.startswith("manver_block_preview:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_preview_manual_verification
+
+            response = asyncio.run(
+                handle_preview_manual_verification(user_id, offer_id)
+            )
+        elif callback_data.startswith("offer_save:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_save_offer
+
+            response = asyncio.run(handle_save_offer(user_id, offer_id))
+        elif callback_data.startswith("offer_delete_confirm:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_offer_confirm
+
+            response = asyncio.run(handle_delete_offer_confirm(user_id, offer_id))
+        elif callback_data.startswith("offer_delete:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_offer
+
+            response = asyncio.run(handle_delete_offer(user_id, offer_id))
+        elif callback_data.startswith("offer_edit:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_edit_menu
+
+            response = asyncio.run(handle_offer_edit_menu(user_id, offer_id))
+        elif callback_data.startswith("offer_value_click:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_value_click
+
+            response = asyncio.run(handle_offer_value_click(user_id, offer_id))
+        elif callback_data.startswith("offer_deliverable_menu:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_deliverable_menu
+
+            response = asyncio.run(handle_offer_deliverable_menu(user_id, offer_id))
+        elif callback_data.startswith("offer_manual_verify_toggle:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_manual_verification_toggle
+
+            response = asyncio.run(
+                handle_offer_manual_verification_toggle(user_id, offer_id)
+            )
+        elif callback_data.startswith("offer_save_final:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_offer_save_final
+
+            response = asyncio.run(handle_offer_save_final(user_id, offer_id))
+        elif callback_data.startswith("deliverable_add:"):
+            offer_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_create_deliverable
+
+            response = asyncio.run(handle_create_deliverable(user_id, offer_id))
+        elif callback_data.startswith("deliverable_delete:"):
+            deliverable_id = int(callback_data.split(":")[1])
+            from handlers.offers import handle_delete_deliverable
+
+            response = asyncio.run(handle_delete_deliverable(user_id, deliverable_id))
+        # Gateway callbacks
+        elif callback_data == "gateway_menu":
+            from handlers.gateway import handle_gateway_menu
+
+            response = asyncio.run(handle_gateway_menu(user_id))
+        elif callback_data == "gateway_pushinpay":
+            from handlers.gateway import handle_pushinpay_menu
+
+            response = asyncio.run(handle_pushinpay_menu(user_id))
+        elif callback_data == "gateway_add_token":
+            from handlers.gateway.token_handlers import handle_request_token
+
+            response = asyncio.run(handle_request_token(user_id))
+        elif callback_data == "gateway_edit_token":
+            from handlers.gateway.token_handlers import handle_edit_token
+
+            response = asyncio.run(handle_edit_token(user_id))
+        elif callback_data == "gateway_update_token":
+            from handlers.gateway import handle_update_token
+
+            response = asyncio.run(handle_update_token(user_id))
+        elif callback_data == "gateway_delete_token":
+            from handlers.gateway import handle_delete_token
+
+            response = asyncio.run(handle_delete_token(user_id))
         elif callback_data == "back_to_main":
             response = asyncio.run(handle_start(user_id))
 
@@ -248,6 +538,282 @@ def process_manager_update(self, update: dict):
                 elif state == "awaiting_initial_phase_prompt":
                     response = asyncio.run(
                         handle_initial_phase_prompt_input(user_id, data["bot_id"], text)
+                    )
+
+                # Offer states
+                elif state == "awaiting_offer_name":
+                    from handlers.offers import handle_offer_name_input
+
+                    response = asyncio.run(
+                        handle_offer_name_input(user_id, data["bot_id"], text)
+                    )
+
+                elif state == "awaiting_offer_value":
+                    from handlers.offers import handle_offer_value_input
+
+                    response = asyncio.run(
+                        handle_offer_value_input(
+                            user_id, data["bot_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_offer_value_edit":
+                    from handlers.offers import handle_offer_value_edit_input
+
+                    response = asyncio.run(
+                        handle_offer_value_edit_input(user_id, data["offer_id"], text)
+                    )
+
+                elif state == "awaiting_deliverable_content":
+                    from handlers.offers import handle_deliverable_content_input
+
+                    response = asyncio.run(
+                        handle_deliverable_content_input(
+                            user_id, data["offer_id"], text
+                        )
+                    )
+
+                # Gateway states
+                elif state == "awaiting_gateway_token":
+                    from handlers.gateway.token_handlers import handle_token_input
+
+                    response = asyncio.run(handle_token_input(user_id, text))
+
+                elif state == "awaiting_block_text":
+                    from handlers.offers import handle_block_text_input
+
+                    response = asyncio.run(
+                        handle_block_text_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_block_media":
+                    # Handle media upload
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        # Use largest photo
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.offers import handle_block_media_input
+
+                        response = asyncio.run(
+                            handle_block_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["offer_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Por favor, envie uma mídia (foto, vídeo, áudio, gif ou documento).",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_block_delay":
+                    from handlers.offers import handle_block_delay_input
+
+                    response = asyncio.run(
+                        handle_block_delay_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_block_autodel":
+                    from handlers.offers import handle_block_autodel_input
+
+                    response = asyncio.run(
+                        handle_block_autodel_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                # Deliverable block states
+                elif state == "awaiting_deliv_block_text":
+                    from handlers.offers import handle_deliverable_block_text_input
+
+                    response = asyncio.run(
+                        handle_deliverable_block_text_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_deliv_block_media":
+                    # Handle media upload
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        # Pegar foto de maior resolução
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.offers import handle_deliverable_block_media_input
+
+                        response = asyncio.run(
+                            handle_deliverable_block_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["offer_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Tipo de mídia não suportado. Envie foto, vídeo, áudio, gif ou documento.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_deliv_block_delay":
+                    from handlers.offers import handle_deliverable_block_delay_input
+
+                    response = asyncio.run(
+                        handle_deliverable_block_delay_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_deliv_block_autodel":
+                    from handlers.offers import handle_deliverable_block_autodel_input
+
+                    response = asyncio.run(
+                        handle_deliverable_block_autodel_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                # Manual verification states
+                elif state == "awaiting_manver_trigger":
+                    from handlers.offers import handle_verification_trigger_input
+
+                    response = asyncio.run(
+                        handle_verification_trigger_input(
+                            user_id, data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_manver_block_text":
+                    from handlers.offers import (
+                        handle_manual_verification_block_text_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_manual_verification_block_text_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_manver_block_media":
+                    # Handle media upload
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.offers import (
+                            handle_manual_verification_block_media_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_manual_verification_block_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["offer_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Tipo de mídia não suportado. Envie foto, vídeo, áudio, gif ou documento.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_manver_block_delay":
+                    from handlers.offers import (
+                        handle_manual_verification_block_delay_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_manual_verification_block_delay_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_manver_block_autodel":
+                    from handlers.offers import (
+                        handle_manual_verification_block_autodel_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_manual_verification_block_autodel_input(
+                            user_id, data["block_id"], data["offer_id"], text
+                        )
                     )
 
     # Enviar resposta

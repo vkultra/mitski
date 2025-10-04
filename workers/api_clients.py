@@ -65,12 +65,25 @@ class TelegramAPI:
                     continue
                 raise
 
-    async def send_message(self, token: str, chat_id: int, text: str) -> Dict[str, Any]:
+    async def send_message(
+        self,
+        token: str,
+        chat_id: int,
+        text: str,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
         """Envia mensagem (versão assíncrona)"""
+        payload = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self.BASE_URL}{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -84,6 +97,136 @@ class TelegramAPI:
             )
             response.raise_for_status()
             return response.json()["result"]
+
+    async def send_photo(
+        self,
+        token: str,
+        chat_id: int,
+        photo: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia foto"""
+        payload = {"chat_id": chat_id, "photo": photo}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendPhoto",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def send_video(
+        self,
+        token: str,
+        chat_id: int,
+        video: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia vídeo"""
+        payload = {"chat_id": chat_id, "video": video}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendVideo",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def send_document(
+        self,
+        token: str,
+        chat_id: int,
+        document: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia documento"""
+        payload = {"chat_id": chat_id, "document": document}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendDocument",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def send_audio(
+        self,
+        token: str,
+        chat_id: int,
+        audio: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia áudio"""
+        payload = {"chat_id": chat_id, "audio": audio}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendAudio",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def send_animation(
+        self,
+        token: str,
+        chat_id: int,
+        animation: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia GIF/animação"""
+        payload = {"chat_id": chat_id, "animation": animation}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendAnimation",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
 
     def answer_callback_query_sync(
         self, token: str, callback_query_id: str, text: str = ""
