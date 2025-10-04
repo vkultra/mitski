@@ -1627,3 +1627,62 @@ class OfferManualVerificationBlockRepository:
                 session.commit()
                 return True
             return False
+
+
+class MediaFileCacheRepository:
+    """Repository para cache de file_ids entre bots"""
+
+    @staticmethod
+    async def get_cached_file_id(
+        original_file_id: str, bot_id: int
+    ) -> Optional[str]:
+        """Busca file_id em cache para o bot específico"""
+        from .models import MediaFileCache
+
+        with SessionLocal() as session:
+            cache = (
+                session.query(MediaFileCache)
+                .filter(
+                    MediaFileCache.original_file_id == original_file_id,
+                    MediaFileCache.bot_id == bot_id,
+                )
+                .first()
+            )
+            return cache.cached_file_id if cache else None
+
+    @staticmethod
+    async def save_cached_file_id(
+        original_file_id: str,
+        bot_id: int,
+        cached_file_id: str,
+        media_type: str,
+    ):
+        """Salva file_id em cache"""
+        from .models import MediaFileCache
+
+        with SessionLocal() as session:
+            # Verificar se já existe
+            existing = (
+                session.query(MediaFileCache)
+                .filter(
+                    MediaFileCache.original_file_id == original_file_id,
+                    MediaFileCache.bot_id == bot_id,
+                )
+                .first()
+            )
+
+            if existing:
+                # Atualizar
+                existing.cached_file_id = cached_file_id
+                existing.media_type = media_type
+            else:
+                # Criar novo
+                cache = MediaFileCache(
+                    original_file_id=original_file_id,
+                    bot_id=bot_id,
+                    cached_file_id=cached_file_id,
+                    media_type=media_type,
+                )
+                session.add(cache)
+
+            session.commit()

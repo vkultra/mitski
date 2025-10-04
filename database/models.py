@@ -340,3 +340,25 @@ class OfferManualVerificationBlock(Base):
     __table_args__ = (
         Index("idx_manual_verification_blocks_order", "offer_id", "order"),
     )
+
+
+class MediaFileCache(Base):
+    """Cache de file_ids de mídia por bot (stream entre bots)"""
+
+    __tablename__ = "media_file_cache"
+
+    id = Column(Integer, primary_key=True)
+    original_file_id = Column(
+        String(256), nullable=False
+    )  # file_id do bot gerenciador
+    bot_id = Column(
+        Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )  # bot que vai usar
+    cached_file_id = Column(String(256), nullable=False)  # file_id válido para o bot
+    media_type = Column(String(32), nullable=False)  # photo, video, etc
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_media_cache_lookup", "original_file_id", "bot_id"),
+        Index("idx_media_cache_bot", "bot_id"),
+    )
