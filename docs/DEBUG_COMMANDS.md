@@ -40,7 +40,27 @@ Lista todos os comandos de debug disponíveis para o bot.
 - Lista de comandos fixos
 - Ações personalizadas cadastradas
 - Ofertas disponíveis
-- Instruções de uso
+- Instruções de uso com modo verbose
+
+## Modos de Execução
+
+### Modo Silencioso (Padrão)
+Simula 100% o comportamento real - apenas envia os blocos de conteúdo sem mensagens extras.
+
+```
+/vendaaprovada
+/nome_da_acao
+/nome_da_oferta
+```
+
+### Modo Verbose
+Mostra mensagens de debug antes e depois da execução para facilitar o acompanhamento.
+
+```
+/vendaaprovada verbose
+/nome_da_acao verbose
+/nome_da_oferta verbose
+```
 
 ### 2. `/vendaaprovada` ou `/venda_aprovada`
 
@@ -48,15 +68,16 @@ Simula um pagamento PIX aprovado e entrega o conteúdo da primeira oferta dispon
 
 **Uso:**
 ```
-/vendaaprovada
+/vendaaprovada           # Modo silencioso (igual ao real)
+/vendaaprovada verbose   # Mostra mensagens de debug
 ```
 
 **Comportamento:**
 1. Busca primeira oferta ativa do bot
 2. Verifica se há conteúdo de entrega configurado
-3. Simula pagamento aprovado
-4. Entrega todos os blocos de conteúdo
-5. Envia confirmação de entrega
+3. Entrega todos os blocos de conteúdo
+4. **Modo silencioso**: Sem mensagens extras
+5. **Modo verbose**: Mostra progresso e confirmação
 
 **Validações:**
 - Oferta deve existir e estar ativa
@@ -68,16 +89,16 @@ Dispara uma ação personalizada cadastrada no sistema.
 
 **Uso:**
 ```
-/termo_de_uso
-/bonus_especial
-/conteudo_vip
+/termo_de_uso             # Modo silencioso
+/bonus_especial verbose   # Modo verbose
+/conteudo_vip v          # v = atalho para verbose
 ```
 
 **Comportamento:**
 1. Busca ação pelo nome exato
 2. Verifica se está ativa
 3. Envia todos os blocos configurados
-4. Confirma execução
+4. **Modo verbose**: Confirma execução
 
 **Validações:**
 - Nome deve corresponder exatamente ao cadastrado
@@ -89,9 +110,9 @@ Envia o pitch completo de uma oferta específica.
 
 **Uso:**
 ```
-/curso_python
-/mentoria_vip
-/ebook_gratis
+/curso_python             # Modo silencioso
+/mentoria_vip verbose     # Modo verbose
+/ebook_gratis v          # v = atalho para verbose
 ```
 
 **Comportamento:**
@@ -99,7 +120,7 @@ Envia o pitch completo de uma oferta específica.
 2. Verifica se está ativa
 3. Envia todos os blocos do pitch
 4. Substitui variáveis dinâmicas ({pix}, {nome}, etc)
-5. Confirma envio
+5. **Modo verbose**: Confirma envio
 
 **Validações:**
 - Nome deve corresponder exatamente ao cadastrado
@@ -199,13 +220,17 @@ logger.info(
 
 ## Mensagens de Feedback
 
-### Sucesso
+### Modo Silencioso (Padrão)
+Nenhuma mensagem adicional - comportamento idêntico ao sistema real.
+
+### Modo Verbose
+#### Sucesso:
 - ✅ Simulando pagamento aprovado
 - ✅ Ação executada!
 - ✅ Pitch enviado!
 - ✅ Entrega concluída!
 
-### Erros
+### Erros (sempre mostrados)
 - ⚠️ Nenhuma oferta encontrada
 - ⚠️ Ação não encontrada
 - ⚠️ Oferta desativada

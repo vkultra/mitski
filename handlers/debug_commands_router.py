@@ -85,17 +85,25 @@ class DebugCommandRouter:
                 bot_id=bot_id, chat_id=chat_id, bot_token=bot_token
             )
 
-        # Comando: /vendaaprovada
-        if command_lower in ["vendaaprovada", "venda_aprovada"]:
+        # Comando: /vendaaprovada (com suporte a verbose)
+        if command_lower.startswith("vendaaprovada") or command_lower.startswith("venda_aprovada"):
+            # Verificar se tem parâmetro verbose
+            verbose = "verbose" in command_lower or "v" in command_lower.split()
             return await DebugCommandHandler.handle_venda_aprovada(
                 bot_id=bot_id,
                 chat_id=chat_id,
                 user_telegram_id=user_telegram_id,
                 bot_token=bot_token,
+                verbose=verbose,
             )
 
         # Verificar se é uma ação (termo de ações)
-        action = await AIActionRepository.get_by_name(bot_id, command)
+        # Separar comando base e verificar verbose
+        parts = command.split()
+        base_command = parts[0] if parts else command
+        verbose = len(parts) > 1 and parts[1].lower() in ["verbose", "v"]
+
+        action = await AIActionRepository.get_by_name(bot_id, base_command)
         if action and action.is_active:
             logger.info(
                 "Debug command matched action",
@@ -103,14 +111,19 @@ class DebugCommandRouter:
                     "bot_id": bot_id,
                     "action_name": action.action_name,
                     "action_id": action.id,
+                    "verbose": verbose,
                 },
             )
             return await DebugCommandHandler.handle_trigger_action(
-                bot_id=bot_id, chat_id=chat_id, action_name=command, bot_token=bot_token
+                bot_id=bot_id,
+                chat_id=chat_id,
+                action_name=base_command,
+                bot_token=bot_token,
+                verbose=verbose
             )
 
         # Verificar se é uma oferta
-        offer = await OfferRepository.get_by_name(bot_id, command)
+        offer = await OfferRepository.get_by_name(bot_id, base_command)
         if offer and offer.is_active:
             logger.info(
                 "Debug command matched offer",
@@ -118,14 +131,16 @@ class DebugCommandRouter:
                     "bot_id": bot_id,
                     "offer_name": offer.name,
                     "offer_id": offer.id,
+                    "verbose": verbose,
                 },
             )
             return await DebugCommandHandler.handle_offer_pitch(
                 bot_id=bot_id,
                 chat_id=chat_id,
                 user_telegram_id=user_telegram_id,
-                offer_name=command,
+                offer_name=base_command,
                 bot_token=bot_token,
+                verbose=verbose,
             )
 
         # Se não é nenhum comando reconhecido, retorna None

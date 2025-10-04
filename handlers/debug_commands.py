@@ -26,6 +26,7 @@ class DebugCommandHandler:
         user_telegram_id: int,
         bot_token: str,
         offer_name: Optional[str] = None,
+        verbose: bool = False,
     ) -> Dict:
         """
         Simula uma venda aprovada e entrega o conteúdo
@@ -36,6 +37,7 @@ class DebugCommandHandler:
             user_telegram_id: ID do usuário
             bot_token: Token do bot
             offer_name: Nome da oferta (opcional, pega a primeira se não especificado)
+            verbose: Se True, mostra mensagens de debug (default: False)
 
         Returns:
             Dict com resultado da simulação
@@ -82,14 +84,15 @@ class DebugCommandHandler:
                 )
                 return {"success": False, "error": "no_deliverable_content"}
 
-            # Simular transação paga
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"✅ Simulando pagamento aprovado para oferta: {offer.name}\n"
-                f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
-                f"Entregando conteúdo...",
-            )
+            # Simular transação paga (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Simulando pagamento aprovado para oferta: {offer.name}\n"
+                    f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
+                    f"Entregando conteúdo...",
+                )
 
             # Usar DeliverableSender igual ao sistema real
             from services.offers.deliverable_sender import DeliverableSender
@@ -102,13 +105,15 @@ class DebugCommandHandler:
                 bot_id=bot_id,
             )
 
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"✅ Entrega concluída!\n"
-                f"📦 {len(message_ids)} blocos entregues\n"
-                f"🎯 Debug /vendaaprovada executado com sucesso",
-            )
+            # Mensagem de confirmação (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Entrega concluída!\n"
+                    f"📦 {len(message_ids)} blocos entregues\n"
+                    f"🎯 Debug /vendaaprovada executado com sucesso",
+                )
 
             return {
                 "success": True,
@@ -129,7 +134,7 @@ class DebugCommandHandler:
 
     @staticmethod
     async def handle_trigger_action(
-        bot_id: int, chat_id: int, action_name: str, bot_token: str
+        bot_id: int, chat_id: int, action_name: str, bot_token: str, verbose: bool = False
     ) -> Dict:
         """
         Dispara uma ação personalizada pelo nome
@@ -139,6 +144,7 @@ class DebugCommandHandler:
             chat_id: ID do chat
             action_name: Nome da ação
             bot_token: Token do bot
+            verbose: Se True, mostra mensagens de debug (default: False)
 
         Returns:
             Dict com resultado do disparo
@@ -171,14 +177,15 @@ class DebugCommandHandler:
                 )
                 return {"success": False, "error": "action_inactive"}
 
-            # Enviar mensagem de debug
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"🎯 Disparando ação: {action.action_name}\n"
-                f"📝 Descrição: {action.description or 'Sem descrição'}\n\n"
-                f"Enviando blocos...",
-            )
+            # Enviar mensagem de debug (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"🎯 Disparando ação: {action.action_name}\n"
+                    f"📝 Descrição: {action.description or 'Sem descrição'}\n\n"
+                    f"Enviando blocos...",
+                )
 
             # Enviar blocos da ação
             sender = ActionSenderService(bot_token)
@@ -186,13 +193,15 @@ class DebugCommandHandler:
                 action_id=action.id, chat_id=chat_id, bot_id=bot_id
             )
 
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"✅ Ação executada!\n"
-                f"📦 {len(message_ids)} blocos enviados\n"
-                f"🎯 Debug /{action_name} executado com sucesso",
-            )
+            # Mensagem de confirmação (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Ação executada!\n"
+                    f"📦 {len(message_ids)} blocos enviados\n"
+                    f"🎯 Debug /{action_name} executado com sucesso",
+                )
 
             return {
                 "success": True,
@@ -218,6 +227,7 @@ class DebugCommandHandler:
         user_telegram_id: int,
         offer_name: str,
         bot_token: str,
+        verbose: bool = False,
     ) -> Dict:
         """
         Envia o pitch de uma oferta específica
@@ -228,6 +238,7 @@ class DebugCommandHandler:
             user_telegram_id: ID do usuário
             offer_name: Nome da oferta
             bot_token: Token do bot
+            verbose: Se True, mostra mensagens de debug (default: False)
 
         Returns:
             Dict com resultado do envio
@@ -256,14 +267,15 @@ class DebugCommandHandler:
                 )
                 return {"success": False, "error": "offer_inactive"}
 
-            # Enviar mensagem de debug
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"🎯 Enviando pitch da oferta: {offer.name}\n"
-                f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
-                f"Enviando blocos do pitch...",
-            )
+            # Enviar mensagem de debug (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"🎯 Enviando pitch da oferta: {offer.name}\n"
+                    f"💰 Valor: {offer.value or 'Sem valor definido'}\n\n"
+                    f"Enviando blocos do pitch...",
+                )
 
             # Enviar pitch
             sender = PitchSenderService(bot_token)
@@ -274,13 +286,15 @@ class DebugCommandHandler:
                 user_telegram_id=user_telegram_id,
             )
 
-            await TelegramAPI().send_message(
-                bot_token,
-                chat_id,
-                f"✅ Pitch enviado!\n"
-                f"📦 {len(message_ids)} blocos enviados\n"
-                f"🎯 Debug /{offer_name} executado com sucesso",
-            )
+            # Mensagem de confirmação (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Pitch enviado!\n"
+                    f"📦 {len(message_ids)} blocos enviados\n"
+                    f"🎯 Debug /{offer_name} executado com sucesso",
+                )
 
             return {
                 "success": True,
@@ -395,8 +409,12 @@ async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
 
         help_text += "📝 **Como usar:**\n"
         help_text += "1. Digite o comando exatamente como mostrado\n"
-        help_text += "2. Os comandos simulam o comportamento real\n"
-        help_text += "3. Use para testar fluxos sem pagamento real\n\n"
+        help_text += "2. **Modo Silencioso** (padrão): `/comando` - Simula 100% o real\n"
+        help_text += "3. **Modo Verbose**: `/comando verbose` - Mostra mensagens de debug\n"
+        help_text += "4. Use para testar fluxos sem pagamento real\n\n"
+        help_text += "💡 **Exemplos:**\n"
+        help_text += "• `/vendaaprovada` - Entrega sem mensagens extras\n"
+        help_text += "• `/vendaaprovada verbose` - Mostra progresso da simulação\n\n"
         help_text += "⚡ **Debug Mode Ativo**"
 
         api = TelegramAPI()
