@@ -27,3 +27,6 @@ celery_app.conf.update(
 
 # Importar tasks para registro
 celery_app.autodiscover_tasks(["workers"])
+
+# Importar tasks de IA explicitamente
+from workers import ai_tasks  # noqa: F401, E402
