@@ -2,6 +2,7 @@
 Clientes para APIs externas (Telegram, etc)
 """
 
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -49,10 +50,20 @@ class TelegramAPI:
         if keyboard:
             payload["reply_markup"] = keyboard
 
-        with httpx.Client() as client:
-            response = client.post(f"{self.BASE_URL}{token}/sendMessage", json=payload)
-            response.raise_for_status()
-            return response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(
+                        f"{self.BASE_URL}{token}/sendMessage", json=payload
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s
+                    continue
+                raise
 
     async def send_message(self, token: str, chat_id: int, text: str) -> Dict[str, Any]:
         """Envia mensagem (versão assíncrona)"""
@@ -78,13 +89,21 @@ class TelegramAPI:
         self, token: str, callback_query_id: str, text: str = ""
     ) -> Dict[str, Any]:
         """Responde callback query (versão síncrona)"""
-        with httpx.Client() as client:
-            response = client.post(
-                f"{self.BASE_URL}{token}/answerCallbackQuery",
-                json={"callback_query_id": callback_query_id, "text": text},
-            )
-            response.raise_for_status()
-            return response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(
+                        f"{self.BASE_URL}{token}/answerCallbackQuery",
+                        json={"callback_query_id": callback_query_id, "text": text},
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise
 
     def edit_message_sync(
         self,
@@ -104,9 +123,28 @@ class TelegramAPI:
         if keyboard:
             payload["reply_markup"] = keyboard
 
-        with httpx.Client() as client:
-            response = client.post(
-                f"{self.BASE_URL}{token}/editMessageText", json=payload
-            )
-            response.raise_for_status()
-            return response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(
+                        f"{self.BASE_URL}{token}/editMessageText", json=payload
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.HTTPStatusError as e:
+                # Se mensagem já foi editada (400 Bad Request), não falhar
+                if e.response.status_code == 400:
+                    from core.telemetry import logger
+
+                    logger.warning(
+                        "Edit message failed (probably already edited)",
+                        extra={"message_id": message_id, "error": str(e)},
+                    )
+                    return {"ok": False, "description": "message already edited"}
+                raise
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise

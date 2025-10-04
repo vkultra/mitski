@@ -3,7 +3,9 @@ Logging estruturado e telemetria
 """
 
 import logging
+import os
 import re
+from logging.handlers import RotatingFileHandler
 
 from pythonjsonlogger import jsonlogger
 
@@ -36,10 +38,23 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 
 
 # Configuração do logger
-handler = logging.StreamHandler()
-handler.setFormatter(CustomJsonFormatter())
-handler.addFilter(RedactSecrets())
-
 logger = logging.getLogger("telegram_bot_manager")
-logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+# Handler para console (stdout)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(CustomJsonFormatter())
+console_handler.addFilter(RedactSecrets())
+logger.addHandler(console_handler)
+
+# Handler para arquivo (logs/app.log)
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+os.makedirs(log_dir, exist_ok=True)
+file_handler = RotatingFileHandler(
+    os.path.join(log_dir, "app.log"),
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+)
+file_handler.setFormatter(CustomJsonFormatter())
+file_handler.addFilter(RedactSecrets())
+logger.addHandler(file_handler)

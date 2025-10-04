@@ -6,7 +6,7 @@ import asyncio
 from typing import Any, Dict, List
 
 from xai_sdk import AsyncClient
-from xai_sdk.chat import Response, user
+from xai_sdk.chat import Response, assistant, system, user
 
 from core.redis_client import redis_client
 from core.telemetry import logger
@@ -112,6 +112,24 @@ class GrokAPIClient:
             if not await self._check_rate_limit():
                 raise Exception("Rate limit exceeded: 480 req/min")
 
+        # Log detalhado da requisição
+        logger.info(
+            "Grok API request started",
+            extra={
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "num_messages": len(messages),
+                "system_prompt": messages[0].get("content", "")[:200]
+                if messages and messages[0].get("role") == "system"
+                else None,
+                "last_user_message": next(
+                    (m.get("content", "")[:200] for m in reversed(messages) if m.get("role") == "user"),
+                    None,
+                ),
+            },
+        )
+
         try:
             # Controla concorrência com semaphore global (recomendação xAI)
             async with self.semaphore:
@@ -123,26 +141,27 @@ class GrokAPIClient:
                 # Adiciona mensagens ao chat
                 for msg in messages:
                     if msg["role"] == "system":
-                        # System messages não têm helper direto, usar dict
-                        chat.messages.append(msg)
+                        # System messages: usar helper system()
+                        chat.append(system(msg["content"]))
                     elif msg["role"] == "user":
                         # Verifica se é multimodal (com imagem)
                         if isinstance(msg.get("content"), list):
                             # Multimodal: usar dict diretamente
                             chat.messages.append(msg)
                         else:
-                            # Texto simples: usar helper
+                            # Texto simples: usar helper user()
                             chat.append(user(msg["content"]))
+                    elif msg["role"] == "assistant":
+                        # Assistant messages do histórico: usar helper assistant()
+                        chat.append(assistant(msg["content"]))
 
                 # Executa request
                 response: Response = await chat.sample()
 
-                # Extrai dados
+                # Extrai dados (Response já tem os atributos diretamente)
                 result = {
-                    "content": response.message.content or "",
-                    "reasoning_content": getattr(
-                        response.message, "reasoning_content", None
-                    ),
+                    "content": getattr(response, "content", "") or "",
+                    "reasoning_content": getattr(response, "reasoning_content", None),
                     "usage": {
                         "prompt_tokens": response.usage.prompt_tokens,
                         "cached_tokens": getattr(response.usage, "cached_tokens", 0),
@@ -152,7 +171,7 @@ class GrokAPIClient:
                         ),
                         "total_tokens": response.usage.total_tokens,
                     },
-                    "finish_reason": response.finish_reason,
+                    "finish_reason": getattr(response, "finish_reason", "stop"),
                 }
 
                 logger.info(
@@ -163,6 +182,9 @@ class GrokAPIClient:
                         "cached_tokens": result["usage"]["cached_tokens"],
                         "concurrent_requests": self.max_concurrent
                         - self.semaphore._value,
+                        "response_preview": result["content"][:200] if result["content"] else None,
+                        "has_reasoning": bool(result["reasoning_content"]),
+                        "finish_reason": result["finish_reason"],
                     },
                 )
 

@@ -2,6 +2,8 @@
 Tasks de processamento de IA para bots secundários
 """
 
+import asyncio
+
 from core.config import settings
 from core.telemetry import logger
 from services.ai.conversation import AIConversationService
@@ -9,7 +11,7 @@ from workers.celery_app import celery_app
 
 
 @celery_app.task(bind=True, max_retries=3)
-async def process_ai_message(
+def process_ai_message(
     self,
     bot_id: int,
     user_telegram_id: int,
@@ -18,7 +20,7 @@ async def process_ai_message(
     bot_token: str = None,
 ):
     """
-    Processa mensagem do usuário com IA Grok (ASYNC)
+    Processa mensagem do usuário com IA Grok
 
     Fluxo:
     1. Busca histórico e configuração
@@ -36,18 +38,19 @@ async def process_ai_message(
         bot_token: Token do bot (para baixar imagens)
 
     Note:
-        Agora usa async def nativo do Celery 5.4+
-        Permite processar múltiplas mensagens simultaneamente por worker
+        Usa asyncio.run() para executar código assíncrono
     """
     try:
-        # Processar com IA (agora async nativo, sem run_until_complete)
-        response_text = await AIConversationService.process_user_message(
-            bot_id=bot_id,
-            user_telegram_id=user_telegram_id,
-            text=text,
-            photo_file_ids=photo_file_ids or [],
-            bot_token=bot_token,
-            xai_api_key=settings.XAI_API_KEY,
+        # Processar com IA usando asyncio.run()
+        response_text = asyncio.run(
+            AIConversationService.process_user_message(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                text=text,
+                photo_file_ids=photo_file_ids or [],
+                bot_token=bot_token,
+                xai_api_key=settings.XAI_API_KEY,
+            )
         )
 
         # Enviar resposta (import aqui para evitar circular import)

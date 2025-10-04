@@ -82,7 +82,7 @@ async def handle_bot_selected_for_ai(user_id: int, bot_id: int) -> Dict[str, Any
                     "callback_data": f"ai_general_prompt:{bot_id}",
                 }
             ],
-            [{"text": "➕ Criar Fases", "callback_data": f"ai_create_phase:{bot_id}"}],
+            [{"text": "📋 Gerenciar Fases", "callback_data": f"ai_list_phases:{bot_id}"}],
             [
                 {
                     "text": f"🔄 Modelo: {model_label}",
@@ -130,17 +130,39 @@ async def handle_create_phase_click(user_id: int, bot_id: int) -> Dict[str, Any]
         return {"text": "⛔ Acesso negado.", "keyboard": None}
 
     ConversationStateManager.set_state(
-        user_id, "awaiting_phase_trigger", {"bot_id": bot_id}
+        user_id, "awaiting_phase_name", {"bot_id": bot_id}
     )
 
     return {
-        "text": "➕ *Criar Nova Fase*\n\nDigite um termo único (gatilho):\n\n⚠️ Preferir termos não comuns:\n• `fcf4`\n• `eko3`\n• `zx9p`\n\nQuando a IA retornar este termo, a fase mudará automaticamente.",
+        "text": "➕ *Criar Nova Fase*\n\nDigite o nome da fase:\n\nExemplo: `Negociação`, `Fechamento`, `Suporte`",
+        "keyboard": None,
+    }
+
+
+async def handle_phase_name_input(
+    user_id: int, bot_id: int, name: str
+) -> Dict[str, Any]:
+    """Processa nome da fase"""
+    name = name.strip()
+
+    if len(name) < 3:
+        return {
+            "text": "❌ Nome muito curto. Use pelo menos 3 caracteres.\n\nTente novamente:",
+            "keyboard": None,
+        }
+
+    ConversationStateManager.set_state(
+        user_id, "awaiting_phase_trigger", {"bot_id": bot_id, "name": name}
+    )
+
+    return {
+        "text": f'✅ Nome: `{name}`\n\nAgora digite um termo único (gatilho):\n\n⚠️ Preferir termos não comuns:\n• `fcf4`\n• `eko3`\n• `zx9p`\n\nQuando a IA retornar este termo, a fase mudará automaticamente.',
         "keyboard": None,
     }
 
 
 async def handle_phase_trigger_input(
-    user_id: int, bot_id: int, trigger: str
+    user_id: int, bot_id: int, name: str, trigger: str
 ) -> Dict[str, Any]:
     """Processa trigger da fase"""
     trigger = trigger.strip()
@@ -162,24 +184,26 @@ async def handle_phase_trigger_input(
         }
 
     ConversationStateManager.set_state(
-        user_id, "awaiting_phase_prompt", {"bot_id": bot_id, "trigger": trigger}
+        user_id,
+        "awaiting_phase_prompt",
+        {"bot_id": bot_id, "name": name, "trigger": trigger},
     )
 
     return {
-        "text": f'✅ Trigger: `{trigger}`\n\nAgora digite o prompt desta fase:\n\nExemplo: "Agora você está na fase de fechamento. Seja direto ao oferecer o produto."',
+        "text": f'✅ Nome: `{name}`\n✅ Trigger: `{trigger}`\n\nAgora digite o prompt desta fase:\n\nExemplo: "Agora você está na fase de fechamento. Seja direto ao oferecer o produto."',
         "keyboard": None,
     }
 
 
 async def handle_phase_prompt_input(
-    user_id: int, bot_id: int, trigger: str, prompt: str
+    user_id: int, bot_id: int, name: str, trigger: str, prompt: str
 ) -> Dict[str, Any]:
     """Salva prompt da fase"""
-    await AIConfigService.create_phase(bot_id, trigger, prompt)
+    await AIConfigService.create_phase(bot_id, name, prompt, trigger, is_initial=False)
     ConversationStateManager.clear_state(user_id)
 
     return {
-        "text": f"✅ Fase `{trigger}` criada!\n\nQuando a IA retornar `{trigger}`, esta fase será ativada.",
+        "text": f"✅ Fase `{name}` criada!\n\nQuando a IA retornar `{trigger}`, esta fase será ativada.",
         "keyboard": None,
     }
 

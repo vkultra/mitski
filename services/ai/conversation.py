@@ -44,10 +44,34 @@ class AIConversationService:
         Returns:
             Resposta da IA (SEM reasoning)
         """
+        logger.info(
+            "AI conversation started",
+            extra={
+                "bot_id": bot_id,
+                "user_telegram_id": user_telegram_id,
+                "has_photos": bool(photo_file_ids),
+                "num_photos": len(photo_file_ids) if photo_file_ids else 0,
+                "user_message": text[:200],
+            },
+        )
+
         # 1. Buscar configuração
         ai_config = await AIConfigRepository.get_by_bot_id(bot_id)
         if not ai_config or not ai_config.is_enabled:
             raise ValueError("AI not enabled")
+
+        logger.info(
+            "AI config loaded",
+            extra={
+                "bot_id": bot_id,
+                "model_type": ai_config.model_type,
+                "temperature": float(ai_config.temperature),
+                "max_tokens": ai_config.max_tokens,
+                "general_prompt_preview": ai_config.general_prompt[:200]
+                if ai_config.general_prompt
+                else None,
+            },
+        )
 
         # 2. Buscar/criar sessão
         session = await UserAISessionRepository.get_or_create_session(
@@ -63,6 +87,17 @@ class AIConversationService:
         current_phase = None
         if session.current_phase_id:
             current_phase = await AIPhaseRepository.get_by_id(session.current_phase_id)
+
+        logger.info(
+            "Session and history loaded",
+            extra={
+                "bot_id": bot_id,
+                "user_telegram_id": user_telegram_id,
+                "current_phase_id": session.current_phase_id,
+                "current_phase_name": current_phase.phase_name if current_phase else None,
+                "history_size": len(history),
+            },
+        )
 
         # 5. Processar imagens
         image_urls = []
@@ -119,6 +154,16 @@ class AIConversationService:
             await UserAISessionRepository.update_current_phase(
                 bot_id, user_telegram_id, new_phase.id
             )
+            logger.info(
+                "Phase transition detected",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "detected_trigger": detected_trigger,
+                    "new_phase_id": new_phase.id,
+                    "new_phase_name": new_phase.phase_name,
+                },
+            )
 
         # 10. Salvar histórico
         await ConversationHistoryRepository.add_message(
@@ -150,6 +195,16 @@ class AIConversationService:
         await UserAISessionRepository.increment_message_count(bot_id, user_telegram_id)
 
         await grok_client.close()
+
+        logger.info(
+            "AI conversation completed",
+            extra={
+                "bot_id": bot_id,
+                "user_telegram_id": user_telegram_id,
+                "response_length": len(answer),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+        )
 
         return answer
 

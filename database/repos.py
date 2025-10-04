@@ -5,6 +5,7 @@ Repository Pattern para acesso ao banco
 import os
 from typing import List, Optional
 
+from core.telemetry import logger
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -204,13 +205,41 @@ class AIPhaseRepository:
     """Repository para fases da IA"""
 
     @staticmethod
-    async def create_phase(bot_id: int, trigger: str, prompt: str, order: int = 0):
-        """Cria nova fase"""
+    async def create_phase(
+        bot_id: int,
+        name: str,
+        prompt: str,
+        trigger: str = None,
+        is_initial: bool = False,
+        order: int = 0,
+    ):
+        """
+        Cria nova fase
+
+        Args:
+            bot_id: ID do bot
+            name: Nome legível da fase
+            prompt: Prompt da fase
+            trigger: Termo único (None para fase inicial)
+            is_initial: Se é fase inicial
+            order: Ordem de exibição
+        """
         from .models import AIPhase
 
         with SessionLocal() as session:
+            # Se marcar como inicial, desmarcar outras fases iniciais
+            if is_initial:
+                session.query(AIPhase).filter(
+                    AIPhase.bot_id == bot_id, AIPhase.is_initial == True
+                ).update({"is_initial": False})
+
             phase = AIPhase(
-                bot_id=bot_id, phase_trigger=trigger, phase_prompt=prompt, order=order
+                bot_id=bot_id,
+                phase_name=name,
+                phase_trigger=trigger,
+                phase_prompt=prompt,
+                is_initial=is_initial,
+                order=order,
             )
             session.add(phase)
             session.commit()
@@ -275,6 +304,116 @@ class AIPhaseRepository:
                 session.commit()
                 return True
             return False
+
+    @staticmethod
+    async def get_initial_phase(bot_id: int):
+        """Busca fase inicial do bot"""
+        from .models import AIPhase
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIPhase)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .first()
+            )
+
+    @staticmethod
+    def get_initial_phase_sync(bot_id: int):
+        """Busca fase inicial do bot (sync)"""
+        from .models import AIPhase
+
+        with SessionLocal() as session:
+            return (
+                session.query(AIPhase)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .first()
+            )
+
+    @staticmethod
+    def ensure_initial_phase_sync(bot_id: int):
+        """
+        Garante que existe uma fase inicial (sync)
+        Se não existir, cria uma padrão
+
+        Returns:
+            AIPhase inicial (existente ou recém-criada)
+        """
+        from .models import AIPhase
+
+        with SessionLocal() as session:
+            # Buscar fase inicial
+            initial_phase = (
+                session.query(AIPhase)
+                .filter(AIPhase.bot_id == bot_id, AIPhase.is_initial == True)
+                .first()
+            )
+
+            if not initial_phase:
+                # Criar fase inicial padrão
+                initial_phase = AIPhase(
+                    bot_id=bot_id,
+                    phase_name="Inicial",
+                    phase_trigger=None,
+                    phase_prompt="Você está na fase inicial. Seja acolhedor e pergunte como pode ajudar.",
+                    is_initial=True,
+                    order=0,
+                )
+                session.add(initial_phase)
+                session.commit()
+                session.refresh(initial_phase)
+
+                logger.info(
+                    "Default initial phase created in session (sync)",
+                    extra={
+                        "bot_id": bot_id,
+                        "phase_id": initial_phase.id,
+                    },
+                )
+
+            return initial_phase
+
+    @staticmethod
+    async def set_initial_phase(bot_id: int, phase_id: int) -> bool:
+        """Define fase como inicial (desmarca outras)"""
+        from .models import AIPhase
+
+        with SessionLocal() as session:
+            # Verifica se fase existe
+            phase = session.query(AIPhase).filter(AIPhase.id == phase_id).first()
+            if not phase or phase.bot_id != bot_id:
+                return False
+
+            # Desmarcar todas as fases iniciais do bot
+            session.query(AIPhase).filter(
+                AIPhase.bot_id == bot_id, AIPhase.is_initial == True
+            ).update({"is_initial": False})
+
+            # Marcar nova fase como inicial
+            phase.is_initial = True
+            session.commit()
+            return True
+
+    @staticmethod
+    async def update_phase(
+        phase_id: int, name: str = None, trigger: str = None, prompt: str = None
+    ) -> bool:
+        """Atualiza dados de uma fase"""
+        from .models import AIPhase
+
+        with SessionLocal() as session:
+            phase = session.query(AIPhase).filter(AIPhase.id == phase_id).first()
+            if not phase:
+                return False
+
+            if name is not None:
+                phase.phase_name = name
+            if trigger is not None:
+                phase.phase_trigger = trigger
+            if prompt is not None:
+                phase.phase_prompt = prompt
+
+            session.commit()
+            return True
 
 
 class ConversationHistoryRepository:
@@ -422,9 +561,13 @@ class UserAISessionRepository:
             )
 
             if not ai_session:
+                # Garantir que existe fase inicial
+                initial_phase = AIPhaseRepository.ensure_initial_phase_sync(bot_id)
+
                 ai_session = UserAISession(
                     bot_id=bot_id,
                     user_telegram_id=user_telegram_id,
+                    current_phase_id=initial_phase.id,  # Sempre terá fase inicial
                     message_count=0,
                     last_interaction=datetime.utcnow(),
                 )
@@ -452,9 +595,13 @@ class UserAISessionRepository:
             )
 
             if not ai_session:
+                # Garantir que existe fase inicial
+                initial_phase = AIPhaseRepository.ensure_initial_phase_sync(bot_id)
+
                 ai_session = UserAISession(
                     bot_id=bot_id,
                     user_telegram_id=user_telegram_id,
+                    current_phase_id=initial_phase.id,  # Sempre terá fase inicial
                     message_count=0,
                     last_interaction=datetime.utcnow(),
                 )

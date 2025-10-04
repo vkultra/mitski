@@ -97,10 +97,12 @@ class AIPhase(Base):
 
     id = Column(Integer, primary_key=True)
     bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    phase_name = Column(String(128), nullable=False)  # Nome legível da fase
     phase_trigger = Column(
-        String(32), nullable=False
-    )  # Termo único (ex: "fcf4", "eko3")
+        String(32), nullable=True
+    )  # Termo único (ex: "fcf4", "eko3") - NULL para fase inicial
     phase_prompt = Column(String(4096), nullable=False)  # Prompt da fase
+    is_initial = Column(Boolean, default=False)  # Se é a fase inicial (sem trigger)
     order = Column(Integer, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
