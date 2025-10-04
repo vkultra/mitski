@@ -1,48 +1,64 @@
 """
-Cliente para API Grok (xAI)
+Cliente para API Grok (xAI) usando SDK oficial
 """
 
 import asyncio
 from typing import Any, Dict, List
 
-import httpx
+from xai_sdk import AsyncClient
+from xai_sdk.chat import Response, user
 
 from core.redis_client import redis_client
 from core.telemetry import logger
 
+# Semaphore global compartilhado entre todas as instâncias
+# Garante limite de concorrência global, não por instância
+_GLOBAL_SEMAPHORE = None
+
 
 class GrokAPIClient:
-    """Cliente HTTP para Grok API (xAI)"""
+    """Cliente HTTP para Grok API (xAI) usando SDK oficial"""
 
-    BASE_URL = "https://api.x.ai/v1"
     RATE_LIMIT_KEY = "grok_api_requests:{minute}"
     MAX_REQUESTS_PER_MINUTE = 480
 
-    def __init__(self, api_key: str, max_concurrent: int = 20):
+    def __init__(self, api_key: str, max_concurrent: int = 100):
         """
-        Inicializa cliente Grok API com controle de concorrência
+        Inicializa cliente Grok API com SDK oficial
 
         Args:
             api_key: Token de autenticação xAI
-            max_concurrent: Máximo de requisições simultâneas (default: 20)
-                           Recomendado pela xAI para evitar sobrecarga
+            max_concurrent: Máximo de requisições simultâneas globalmente (default: 100)
+                           Recomendado pela xAI para alto volume
         """
         self.api_key = api_key
         self.max_concurrent = max_concurrent
-        self.semaphore = asyncio.Semaphore(max_concurrent)
 
-        # Connection pooling para reutilizar conexões TCP
-        limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
-
-        self.client = httpx.AsyncClient(
-            base_url=self.BASE_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=httpx.Timeout(60.0),  # 60s para reasoning models
-            limits=limits,
+        # SDK oficial da xAI
+        self.client = AsyncClient(
+            api_key=api_key,
+            timeout=3600,  # 1 hora para reasoning models (recomendação xAI)
         )
+
+        # Semaphore global compartilhado
+        self.semaphore = self._get_global_semaphore(max_concurrent)
+
+    @classmethod
+    def _get_global_semaphore(cls, max_concurrent: int) -> asyncio.Semaphore:
+        """
+        Retorna semaphore global compartilhado
+
+        Garante que apenas 1 semaphore existe para TODAS as instâncias,
+        seguindo exatamente a recomendação da xAI
+        """
+        global _GLOBAL_SEMAPHORE
+        if _GLOBAL_SEMAPHORE is None:
+            _GLOBAL_SEMAPHORE = asyncio.Semaphore(max_concurrent)
+            logger.info(
+                "Global semaphore created",
+                extra={"max_concurrent": max_concurrent},
+            )
+        return _GLOBAL_SEMAPHORE
 
     async def _check_rate_limit(self) -> bool:
         """
@@ -72,93 +88,99 @@ class GrokAPIClient:
         model: str = "grok-4-fast-reasoning",
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        stream: bool = False,
     ) -> Dict[str, Any]:
         """
-        Envia requisição para POST /v1/chat/completions
+        Envia requisição para Grok API usando SDK oficial
 
         Args:
             messages: Lista de mensagens [{"role": "user", "content": "..."}]
             model: "grok-4-fast-reasoning" ou "grok-4-fast-non-reasoning"
             temperature: 0.0 a 2.0 (controla aleatoriedade)
             max_tokens: Máximo de tokens na resposta
-            stream: Se True, retorna streaming (SSE)
 
         Returns:
             {
-                "id": "chatcmpl-abc123",
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "resposta",
-                        "reasoning_content": "pensamento" (opcional)
-                    },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 50,
-                    "cached_tokens": 20,
-                    "completion_tokens": 100,
-                    "reasoning_tokens": 30
-                }
+                "content": "resposta",
+                "reasoning_content": "pensamento" (opcional),
+                "usage": {...},
+                "finish_reason": "stop"
             }
         """
         # Rate limiting
         if not await self._check_rate_limit():
-            await asyncio.sleep(1)  # Aguarda 1s
+            await asyncio.sleep(1)
             if not await self._check_rate_limit():
                 raise Exception("Rate limit exceeded: 480 req/min")
 
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": stream,
-        }
-
         try:
-            # Controla concorrência com semaphore (recomendação xAI)
+            # Controla concorrência com semaphore global (recomendação xAI)
             async with self.semaphore:
-                response = await self.client.post("/chat/completions", json=payload)
-                response.raise_for_status()
+                # Cria chat usando SDK oficial
+                chat = self.client.chat.create(
+                    model=model, temperature=temperature, max_tokens=max_tokens
+                )
 
-                data = response.json()
+                # Adiciona mensagens ao chat
+                for msg in messages:
+                    if msg["role"] == "system":
+                        # System messages não têm helper direto, usar dict
+                        chat.messages.append(msg)
+                    elif msg["role"] == "user":
+                        # Verifica se é multimodal (com imagem)
+                        if isinstance(msg.get("content"), list):
+                            # Multimodal: usar dict diretamente
+                            chat.messages.append(msg)
+                        else:
+                            # Texto simples: usar helper
+                            chat.append(user(msg["content"]))
+
+                # Executa request
+                response: Response = await chat.sample()
+
+                # Extrai dados
+                result = {
+                    "content": response.message.content or "",
+                    "reasoning_content": getattr(
+                        response.message, "reasoning_content", None
+                    ),
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "cached_tokens": getattr(response.usage, "cached_tokens", 0),
+                        "completion_tokens": response.usage.completion_tokens,
+                        "reasoning_tokens": getattr(
+                            response.usage, "reasoning_tokens", 0
+                        ),
+                        "total_tokens": response.usage.total_tokens,
+                    },
+                    "finish_reason": response.finish_reason,
+                }
 
                 logger.info(
-                    "Grok API request successful",
+                    "Grok API request successful (SDK)",
                     extra={
                         "model": model,
-                        "usage": data.get("usage", {}),
-                        "cached_tokens": data.get("usage", {}).get("cached_tokens", 0),
+                        "usage": result["usage"],
+                        "cached_tokens": result["usage"]["cached_tokens"],
                         "concurrent_requests": self.max_concurrent
                         - self.semaphore._value,
                     },
                 )
 
-                return data
-
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                logger.error("Grok API rate limit (429)")
-                raise Exception("Rate limit exceeded by API")
-
-            logger.error(
-                "Grok API HTTP error",
-                extra={"status": e.response.status_code, "body": e.response.text},
-            )
-            raise
+                return result
 
         except Exception as e:
-            logger.error("Grok API client error", extra={"error": str(e)})
+            logger.error(
+                "Grok API client error (SDK)",
+                extra={"error": str(e), "error_type": type(e).__name__},
+            )
             raise
 
     async def extract_response(self, api_response: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extrai resposta da API Grok
+        Extrai resposta (já formatada pelo SDK)
 
         Args:
-            api_response: Response completo da API
+            api_response: Response já processado do SDK
 
         Returns:
             {
@@ -168,19 +190,10 @@ class GrokAPIClient:
                 "finish_reason": "stop"
             }
         """
-        if not api_response.get("choices"):
-            raise ValueError("No choices in response")
-
-        choice = api_response["choices"][0]
-        message = choice.get("message", {})
-
-        return {
-            "content": message.get("content", ""),
-            "reasoning_content": message.get("reasoning_content"),  # Pode ser None
-            "usage": api_response.get("usage", {}),
-            "finish_reason": choice.get("finish_reason"),
-        }
+        # SDK já retorna formatado
+        return api_response
 
     async def close(self):
-        """Fecha cliente HTTP"""
-        await self.client.aclose()
+        """Fecha cliente (SDK gerencia automaticamente)"""
+        # xai_sdk gerencia conexões automaticamente
+        pass

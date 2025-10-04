@@ -6,7 +6,6 @@ from core.config import settings
 from core.telemetry import logger
 from services.ai.conversation import AIConversationService
 from workers.celery_app import celery_app
-from workers.tasks import send_message
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -51,7 +50,9 @@ async def process_ai_message(
             xai_api_key=settings.XAI_API_KEY,
         )
 
-        # Enviar resposta
+        # Enviar resposta (import aqui para evitar circular import)
+        from workers.tasks import send_message
+
         send_message.delay(bot_id, user_telegram_id, response_text)
 
         logger.info(
