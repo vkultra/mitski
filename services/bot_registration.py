@@ -188,3 +188,33 @@ class BotRegistrationService:
             )
 
         return success
+
+    @staticmethod
+    async def activate_bot(admin_id: int, bot_id: int) -> bool:
+        """
+        Reativa um bot
+
+        Args:
+            admin_id: ID do Telegram do administrador
+            bot_id: ID do bot a reativar
+
+        Returns:
+            True se reativou com sucesso
+
+        Raises:
+            ValueError: Se bot não pertence ao admin
+        """
+        bot = await BotRepository.get_bot_by_id(bot_id)
+
+        if not bot:
+            raise ValueError("Bot não encontrado")
+
+        if bot.admin_id != admin_id:
+            raise ValueError("Você não tem permissão para gerenciar este bot")
+
+        success = await BotRepository.activate_bot(bot_id)
+
+        if success:
+            logger.info("Bot activated", extra={"bot_id": bot_id, "admin_id": admin_id})
+
+        return success

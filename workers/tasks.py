@@ -2,6 +2,8 @@
 Tasks assíncronas do Celery
 """
 
+import json
+
 import requests
 
 from core.rate_limiter import check_rate_limit
@@ -39,6 +41,73 @@ def process_telegram_update(self, bot_id: int, update: dict):
     text = message.get("text", "")
     photos = message.get("photo", [])
     chat_id = message.get("chat", {}).get("id", user_id)
+
+    # ANTI-SPAM CHECK (antes de qualquer processamento)
+    from core.redis_client import redis_client
+    from database.repos import AntiSpamConfigRepository
+    from services.antispam import AntiSpamService
+
+    # 1. Early exit se usuário já está banido (cache check)
+    if AntiSpamService.is_banned_cached(bot_id, user_id):
+        logger.info(
+            "Blocked user message ignored",
+            extra={"bot_id": bot_id, "user_id": user_id},
+        )
+        return
+
+    # 2. Carrega configuração anti-spam (com cache Redis)
+    config_key = f"antispam_config:{bot_id}"
+    config_json = redis_client.get(config_key)
+
+    if not config_json:
+        db_config = AntiSpamConfigRepository.get_by_bot_id_sync(bot_id)
+        if db_config:
+            config = AntiSpamConfigRepository.to_dict(db_config)
+            # Cache por 60 segundos
+            redis_client.setex(config_key, 60, json.dumps(config))
+        else:
+            config = None
+    else:
+        config = json.loads(config_json)
+
+    # 3. Se anti-spam está configurado, verifica violações
+    if config:
+        violation = AntiSpamService.check_violations_atomic(
+            bot_id, user_id, message, config
+        )
+
+        # Verifica também violações de texto se não houve violação principal
+        if not violation:
+            # Verifica violações baseadas em texto
+            text_violation = AntiSpamService.check_text_violations(text, config)
+            if text_violation:
+                violation = text_violation
+
+        # Se houve violação, bane usuário
+        if violation:
+            logger.warning(
+                "Anti-spam violation detected",
+                extra={
+                    "bot_id": bot_id,
+                    "user_id": user_id,
+                    "violation": violation,
+                    "message_text": text[:100],  # Log primeiros 100 chars
+                },
+            )
+
+            # Cache instantâneo do ban (usuário bloqueado imediatamente)
+            AntiSpamService.ban_user_cache(bot_id, user_id, violation)
+
+            # Enfileira ban assíncrono (DB + Telegram API)
+            ban_user_async.apply_async(
+                args=[bot_id, user_id, chat_id, violation],
+                queue="bans",  # Queue dedicada
+            )
+
+            # Opcionalmente, envia mensagem de aviso antes do ban
+            # send_message.delay(bot_id, user_id, f"❌ Você foi banido por: {violation}")
+
+            return  # Early exit
 
     # NOVO: Verificar se é comando de debug primeiro
     if text and text.startswith("/"):
@@ -144,6 +213,31 @@ def process_manager_update(self, update: dict):  # noqa: C901
             bot_id = int(callback_data.split(":")[1])
             response_text = asyncio.run(handle_deactivate(user_id, bot_id))
             response = {"text": response_text, "keyboard": None}
+        # Pause/Unpause callbacks
+        elif callback_data == "pause_menu":
+            from handlers.manager_handlers import handle_pause_menu
+
+            response = asyncio.run(handle_pause_menu(user_id))
+        elif callback_data.startswith("pause_confirm:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.manager_handlers import handle_pause_confirm
+
+            response = asyncio.run(handle_pause_confirm(user_id, bot_id))
+        elif callback_data.startswith("unpause_confirm:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.manager_handlers import handle_unpause_confirm
+
+            response = asyncio.run(handle_unpause_confirm(user_id, bot_id))
+        elif callback_data.startswith("pause:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.manager_handlers import handle_pause_bot
+
+            response = asyncio.run(handle_pause_bot(user_id, bot_id))
+        elif callback_data.startswith("unpause:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.manager_handlers import handle_unpause_bot
+
+            response = asyncio.run(handle_unpause_bot(user_id, bot_id))
         # IA Menu callbacks
         elif callback_data == "ai_menu":
             from handlers.ai_handlers import handle_ai_menu_click
@@ -478,6 +572,43 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.gateway import handle_delete_token
 
             response = asyncio.run(handle_delete_token(user_id))
+        # Anti-spam callbacks
+        elif callback_data == "antispam_menu":
+            from handlers.antispam_handlers import handle_antispam_menu_click
+
+            response = asyncio.run(handle_antispam_menu_click(user_id))
+        elif callback_data.startswith("antispam_bots_page:"):
+            page = int(callback_data.split(":")[1])
+            from handlers.antispam_handlers import handle_select_bot_for_antispam
+
+            response = asyncio.run(handle_select_bot_for_antispam(user_id, page))
+        elif callback_data.startswith("antispam_select_bot:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.antispam_handlers import handle_bot_selected_for_antispam
+
+            response = asyncio.run(handle_bot_selected_for_antispam(user_id, bot_id))
+        elif callback_data.startswith("antispam_config:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.antispam_handlers import handle_bot_selected_for_antispam
+
+            response = asyncio.run(handle_bot_selected_for_antispam(user_id, bot_id))
+        elif callback_data.startswith("antispam_extras:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.antispam_handlers import handle_antispam_extras
+
+            response = asyncio.run(handle_antispam_extras(user_id, bot_id))
+        elif callback_data.startswith("antispam_toggle:"):
+            parts = callback_data.split(":")
+            bot_id = int(parts[1])
+            protection = parts[2]
+            from handlers.antispam_handlers import handle_antispam_toggle
+
+            response = asyncio.run(handle_antispam_toggle(user_id, bot_id, protection))
+        elif callback_data.startswith("antispam_set_limit:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.antispam_handlers import handle_set_limit_click
+
+            response = asyncio.run(handle_set_limit_click(user_id, bot_id))
         # Upsell menu callbacks
         elif callback_data.startswith("upsell_menu:"):
             bot_id = int(callback_data.split(":")[1])
@@ -1486,6 +1617,14 @@ def process_manager_update(self, update: dict):  # noqa: C901
                             "keyboard": None,
                         }
 
+                elif state == "awaiting_spam_limit":
+                    # Handler para definir limite de spam
+                    from handlers.antispam_handlers import handle_spam_limit_input
+
+                    response = asyncio.run(
+                        handle_spam_limit_input(user_id, data["bot_id"], text)
+                    )
+
     # Enviar resposta
     if response:
         telegram_api.send_message_sync(
@@ -1567,3 +1706,98 @@ def send_rate_limit_message(bot_id: int, user_id: int):
     send_message.delay(
         bot_id, user_id, "⏳ Muitos comandos em pouco tempo. Aguarde alguns segundos."
     )
+
+
+@celery_app.task(bind=True, max_retries=3, queue="bans", rate_limit="30/s")
+def ban_user_async(self, bot_id: int, user_id: int, chat_id: int, violation_type: str):
+    """
+    Bane usuário de forma assíncrona (não bloqueia processamento)
+    Executa em queue separada para evitar worker starvation
+    """
+    from database.repos import BotRepository, UserRepository
+    from workers.api_clients import TelegramAPI
+
+    try:
+        # 1. Cache já foi setado no processo principal (usuário já está bloqueado)
+        # Aqui só fazemos o ban persistente no DB e Telegram
+
+        # 2. Atualiza banco de dados
+        success = UserRepository.block_user_sync(bot_id, user_id, violation_type)
+
+        if not success:
+            logger.warning(
+                "User already blocked or not found",
+                extra={
+                    "bot_id": bot_id,
+                    "user_id": user_id,
+                    "violation": violation_type,
+                },
+            )
+            return
+
+        # 3. Busca token do bot
+        bot = BotRepository.get_bot_by_id_sync(bot_id)
+        if not bot or not bot.is_active:
+            logger.warning("Bot not found or inactive", extra={"bot_id": bot_id})
+            return
+
+        token = decrypt(bot.token)
+
+        # 4. Bane no Telegram (com retry automático)
+        telegram_api = TelegramAPI()
+        try:
+            banned = telegram_api.ban_chat_member_sync(
+                token=token,
+                chat_id=chat_id,
+                user_id=user_id,
+                revoke_messages=True,  # Remove mensagens do spammer
+            )
+
+            if banned:
+                logger.info(
+                    "User banned successfully",
+                    extra={
+                        "bot_id": bot_id,
+                        "user_id": user_id,
+                        "violation": violation_type,
+                    },
+                )
+            else:
+                logger.warning(
+                    "Failed to ban user via Telegram API",
+                    extra={
+                        "bot_id": bot_id,
+                        "user_id": user_id,
+                        "violation": violation_type,
+                    },
+                )
+
+        except Exception as telegram_error:
+            # Se Telegram API falhar, ainda assim mantém ban no cache/DB
+            logger.error(
+                "Telegram ban failed but user remains blocked",
+                extra={
+                    "bot_id": bot_id,
+                    "user_id": user_id,
+                    "error": str(telegram_error),
+                },
+            )
+
+            # Re-enqueue com delay se for rate limit
+            if "429" in str(telegram_error) or "Too Many Requests" in str(
+                telegram_error
+            ):
+                raise self.retry(countdown=10, exc=telegram_error)
+
+    except Exception as e:
+        logger.error(
+            "ban_user_async failed",
+            extra={
+                "bot_id": bot_id,
+                "user_id": user_id,
+                "violation": violation_type,
+                "error": str(e),
+            },
+        )
+        # Retry com backoff exponencial
+        raise self.retry(countdown=2**self.request.retries, exc=e)

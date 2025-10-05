@@ -55,8 +55,15 @@ class User(Base):
     first_interaction = Column(DateTime, server_default=func.now())
     last_interaction = Column(DateTime, onupdate=func.now())
     is_blocked = Column(Boolean, default=False)
+    block_reason = Column(String(128))  # Razão do bloqueio
+    blocked_at = Column(DateTime)  # Quando foi bloqueado
 
-    __table_args__ = (Index("idx_bot_user", "bot_id", "telegram_id"),)
+    __table_args__ = (
+        Index("idx_bot_user", "bot_id", "telegram_id"),
+        Index(
+            "idx_bot_user_blocked", "bot_id", "is_blocked"
+        ),  # Índice para queries de bloqueio
+    )
 
 
 class Event(Base):
@@ -570,3 +577,39 @@ class UserUpsellHistory(Base):
         Index("idx_bot_user_upsell", "bot_id", "user_telegram_id", "upsell_id"),
         Index("idx_sent_status", "bot_id", "sent_at"),
     )
+
+
+class BotAntiSpamConfig(Base):
+    """Configuração de anti-spam por bot"""
+
+    __tablename__ = "bot_antispam_configs"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(
+        Integer, ForeignKey("bots.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+
+    # Proteções básicas
+    dot_after_start = Column(Boolean, default=True)  # '.' após /start
+    repetition = Column(Boolean, default=True)  # Mensagens repetidas
+    flood = Column(Boolean, default=True)  # Flood de mensagens
+    links_mentions = Column(Boolean, default=True)  # Links e menções
+    short_messages = Column(Boolean, default=True)  # Mensagens curtas
+    loop_start = Column(Boolean, default=True)  # Loop de /start
+    total_limit = Column(Boolean, default=False)  # Limite total de mensagens
+    total_limit_value = Column(Integer, default=100)  # Valor do limite total
+
+    # Proteções adicionais (sugestões)
+    forward_spam = Column(Boolean, default=False)  # Spam de forwards
+    emoji_flood = Column(Boolean, default=False)  # Flood de emojis
+    char_repetition = Column(Boolean, default=False)  # Repetição de caracteres
+    bot_speed = Column(Boolean, default=False)  # Velocidade bot-like
+    media_spam = Column(Boolean, default=False)  # Spam de mídia
+    sticker_spam = Column(Boolean, default=False)  # Spam de stickers
+    contact_spam = Column(Boolean, default=False)  # Spam de contatos
+    location_spam = Column(Boolean, default=False)  # Spam de localização
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_bot_antispam", "bot_id", unique=True),)

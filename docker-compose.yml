@@ -21,7 +21,7 @@ services:
 
   worker:
     build: .
-    command: celery -A workers.celery_app worker --concurrency=10 -l info
+    command: celery -A workers.celery_app worker -Q celery --concurrency=10 -l info
     env_file: .env
     environment:
       - DB_URL=postgresql+psycopg://admin:senha_segura@postgres:5432/telegram_bots
@@ -36,6 +36,42 @@ services:
         condition: service_started
     deploy:
       replicas: 3  # 3 workers = 30 threads
+    volumes:
+      - .:/app
+
+  worker-bans:
+    build: .
+    command: celery -A workers.celery_app worker -Q bans --concurrency=2 -l info
+    env_file: .env
+    environment:
+      - DB_URL=postgresql+psycopg://admin:senha_segura@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - .:/app
+
+  celery-beat:
+    build: .
+    command: celery -A workers.celery_app beat -l info
+    env_file: .env
+    environment:
+      - DB_URL=postgresql+psycopg://admin:senha_segura@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - .:/app
 

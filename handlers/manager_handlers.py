@@ -26,8 +26,14 @@ async def handle_start(user_id: int) -> Dict[str, Any]:
                 {"text": "💳 Gateway", "callback_data": "gateway_menu"},
             ],
             [
-                {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
+                {"text": "🛡️ ANTISPAM", "callback_data": "antispam_menu"},
+            ],
+            [
+                {"text": "⏸️ Pausar", "callback_data": "pause_menu"},
                 {"text": "📋 Listar Bots", "callback_data": "list_bots"},
+            ],
+            [
+                {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
             ],
         ]
     }
@@ -266,3 +272,160 @@ async def handle_callback_deactivate_menu(user_id: int) -> Dict[str, Any]:
             "Deactivate menu failed", extra={"user_id": user_id, "error": str(e)}
         )
         return {"text": f"❌ Erro ao carregar menu: {str(e)}", "keyboard": None}
+
+
+async def handle_pause_menu(user_id: int) -> Dict[str, Any]:
+    """Menu para pausar/despausar bots"""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        bots = await BotRegistrationService.list_bots(user_id)
+        if not bots:
+            return {"text": "📭 Você não tem bots registrados.", "keyboard": None}
+
+        buttons = []
+        for bot in bots:
+            display = (
+                f"{bot.display_name} (@{bot.username})"
+                if bot.display_name
+                else f"@{bot.username}"
+            )
+
+            # Emoji e callback dependem do status
+            if bot.is_active:
+                status_emoji = "▶️"
+                callback = f"pause_confirm:{bot.id}"
+            else:
+                status_emoji = "⏸️"
+                callback = f"unpause_confirm:{bot.id}"
+
+            buttons.append(
+                [{"text": f"{status_emoji} {display}", "callback_data": callback}]
+            )
+
+        buttons.append([{"text": "🔙 Voltar", "callback_data": "back_to_main"}])
+
+        return {
+            "text": "⏸️ *Pausar/Despausar Bots*\n\n▶️ = Ativo (clique para pausar)\n⏸️ = Pausado (clique para despausar)\n\nSelecione um bot:",
+            "keyboard": {"inline_keyboard": buttons},
+        }
+    except Exception as e:
+        logger.error("Pause menu failed", extra={"user_id": user_id, "error": str(e)})
+        return {"text": f"❌ Erro ao carregar menu: {str(e)}", "keyboard": None}
+
+
+async def handle_pause_confirm(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Confirmação para pausar bot"""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        bots = await BotRegistrationService.list_bots(user_id)
+        bot = next((b for b in bots if b.id == bot_id), None)
+
+        if not bot:
+            return {"text": "❌ Bot não encontrado.", "keyboard": None}
+
+        display = (
+            f"{bot.display_name} (@{bot.username})"
+            if bot.display_name
+            else f"@{bot.username}"
+        )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Sim, pausar", "callback_data": f"pause:{bot_id}"},
+                    {"text": "❌ Cancelar", "callback_data": "pause_menu"},
+                ]
+            ]
+        }
+
+        return {
+            "text": f"⚠️ *Confirmar Pausa*\n\nDeseja pausar o bot `{display}`?\n\n"
+            f"O bot parará de responder mensagens até ser despausado.",
+            "keyboard": keyboard,
+        }
+    except Exception as e:
+        logger.error(
+            "Pause confirm failed", extra={"user_id": user_id, "error": str(e)}
+        )
+        return {"text": f"❌ Erro: {str(e)}", "keyboard": None}
+
+
+async def handle_unpause_confirm(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Confirmação para despausar bot"""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        bots = await BotRegistrationService.list_bots(user_id)
+        bot = next((b for b in bots if b.id == bot_id), None)
+
+        if not bot:
+            return {"text": "❌ Bot não encontrado.", "keyboard": None}
+
+        display = (
+            f"{bot.display_name} (@{bot.username})"
+            if bot.display_name
+            else f"@{bot.username}"
+        )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Sim, despausar", "callback_data": f"unpause:{bot_id}"},
+                    {"text": "❌ Cancelar", "callback_data": "pause_menu"},
+                ]
+            ]
+        }
+
+        return {
+            "text": f"✅ *Confirmar Despausa*\n\nDeseja despausar o bot `{display}`?\n\n"
+            f"O bot voltará a responder mensagens normalmente.",
+            "keyboard": keyboard,
+        }
+    except Exception as e:
+        logger.error(
+            "Unpause confirm failed", extra={"user_id": user_id, "error": str(e)}
+        )
+        return {"text": f"❌ Erro: {str(e)}", "keyboard": None}
+
+
+async def handle_pause_bot(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Executa pausa do bot"""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        success = await BotRegistrationService.deactivate_bot(user_id, bot_id)
+        if success:
+            return {
+                "text": "⏸️ Bot pausado com sucesso!\n\nO bot não responderá mais mensagens até ser despausado.",
+                "keyboard": None,
+            }
+        else:
+            return {"text": "❌ Bot não encontrado.", "keyboard": None}
+    except Exception as e:
+        logger.error("Pause bot failed", extra={"user_id": user_id, "error": str(e)})
+        return {"text": f"❌ Erro ao pausar bot: {str(e)}", "keyboard": None}
+
+
+async def handle_unpause_bot(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Executa despausa do bot"""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        success = await BotRegistrationService.activate_bot(user_id, bot_id)
+        if success:
+            return {
+                "text": "▶️ Bot despausado com sucesso!\n\nO bot voltou a responder mensagens normalmente.",
+                "keyboard": None,
+            }
+        else:
+            return {"text": "❌ Bot não encontrado.", "keyboard": None}
+    except Exception as e:
+        logger.error("Unpause bot failed", extra={"user_id": user_id, "error": str(e)})
+        return {"text": f"❌ Erro ao despausar bot: {str(e)}", "keyboard": None}

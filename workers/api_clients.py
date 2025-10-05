@@ -2,6 +2,7 @@
 Clientes para APIs externas (Telegram, etc)
 """
 
+import asyncio
 import json
 import time
 from typing import Any, Dict, Optional
@@ -98,6 +99,68 @@ class TelegramAPI:
             )
             response.raise_for_status()
             return response.json()["result"]
+
+    def ban_chat_member_sync(
+        self, token: str, chat_id: int, user_id: int, revoke_messages: bool = True
+    ) -> bool:
+        """Bane usuário do chat (versão síncrona para workers)"""
+        payload = {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "revoke_messages": revoke_messages,  # Deleta mensagens do usuário
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(
+                        f"{self.BASE_URL}{token}/banChatMember", json=payload
+                    )
+
+                    # Se for rate limit, relança exceção para retry
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", 5))
+                        time.sleep(retry_after)
+                        continue
+
+                    response.raise_for_status()
+                    return response.json().get("ok", False)
+
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise
+
+        return False
+
+    async def ban_chat_member(
+        self, token: str, chat_id: int, user_id: int, revoke_messages: bool = True
+    ) -> bool:
+        """Bane usuário do chat (versão assíncrona)"""
+        payload = {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "revoke_messages": revoke_messages,
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/banChatMember", json=payload
+            )
+
+            # Trata rate limit
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 5))
+                await asyncio.sleep(retry_after)
+                # Retry
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/banChatMember", json=payload
+                )
+
+            response.raise_for_status()
+            return response.json().get("ok", False)
 
     async def send_photo(
         self,

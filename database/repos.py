@@ -86,6 +86,17 @@ class BotRepository:
             return False
 
     @staticmethod
+    async def activate_bot(bot_id: int) -> bool:
+        """Reativa bot"""
+        with SessionLocal() as session:
+            bot = session.query(Bot).filter(Bot.id == bot_id).first()
+            if bot:
+                bot.is_active = True
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
     async def associate_offer(bot_id: int, offer_id: int) -> bool:
         """Associa oferta ao bot (1 bot = 1 oferta)"""
         from datetime import datetime
@@ -157,6 +168,66 @@ class UserRepository:
 
                 user.last_interaction = datetime.utcnow()
                 session.commit()
+
+    @staticmethod
+    def block_user_sync(bot_id: int, telegram_id: int, reason: str) -> bool:
+        """Bloqueia usuário (versão síncrona para workers)"""
+        from datetime import datetime
+
+        from sqlalchemy import text
+
+        with SessionLocal() as session:
+            try:
+                # Usa NOWAIT para evitar lock wait
+                result = session.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET is_blocked = TRUE,
+                            block_reason = :reason,
+                            blocked_at = :blocked_at
+                        WHERE bot_id = :bot_id
+                        AND telegram_id = :telegram_id
+                        AND is_blocked = FALSE
+                    """
+                    ),
+                    {
+                        "bot_id": bot_id,
+                        "telegram_id": telegram_id,
+                        "reason": reason,
+                        "blocked_at": datetime.utcnow(),
+                    },
+                )
+                session.commit()
+                return result.rowcount > 0
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    @staticmethod
+    async def block_user(bot_id: int, telegram_id: int, reason: str) -> bool:
+        """Bloqueia usuário (versão assíncrona)"""
+        return UserRepository.block_user_sync(bot_id, telegram_id, reason)
+
+    @staticmethod
+    def is_blocked_sync(bot_id: int, telegram_id: int) -> bool:
+        """Verifica se usuário está bloqueado (sync para workers)"""
+        with SessionLocal() as session:
+            user = (
+                session.query(User)
+                .filter(
+                    User.bot_id == bot_id,
+                    User.telegram_id == telegram_id,
+                    User.is_blocked == True,  # noqa: E712
+                )
+                .first()
+            )
+            return user is not None
+
+    @staticmethod
+    async def is_blocked(bot_id: int, telegram_id: int) -> bool:
+        """Verifica se usuário está bloqueado"""
+        return UserRepository.is_blocked_sync(bot_id, telegram_id)
 
 
 class AIConfigRepository:
@@ -2922,3 +2993,107 @@ class UserUpsellHistoryRepository:
                 .count()
                 > 0
             )
+
+
+class AntiSpamConfigRepository:
+    """Repository para configurações de anti-spam"""
+
+    @staticmethod
+    async def get_or_create(bot_id: int):
+        """Busca ou cria configuração de anti-spam"""
+        from .models import BotAntiSpamConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(BotAntiSpamConfig)
+                .filter(BotAntiSpamConfig.bot_id == bot_id)
+                .first()
+            )
+
+            if not config:
+                # Cria com valores padrão
+                config = BotAntiSpamConfig(bot_id=bot_id)
+                session.add(config)
+                session.commit()
+                session.refresh(config)
+
+            return config
+
+    @staticmethod
+    def get_by_bot_id_sync(bot_id: int):
+        """Busca configuração (sync para workers)"""
+        from .models import BotAntiSpamConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(BotAntiSpamConfig)
+                .filter(BotAntiSpamConfig.bot_id == bot_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_config(bot_id: int, **kwargs) -> bool:
+        """Atualiza configuração"""
+        from datetime import datetime
+
+        from .models import BotAntiSpamConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(BotAntiSpamConfig)
+                .filter(BotAntiSpamConfig.bot_id == bot_id)
+                .first()
+            )
+
+            if config:
+                for key, value in kwargs.items():
+                    if hasattr(config, key):
+                        setattr(config, key, value)
+                config.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def toggle_protection(bot_id: int, protection: str) -> bool:
+        """Alterna status de uma proteção"""
+        from .models import BotAntiSpamConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(BotAntiSpamConfig)
+                .filter(BotAntiSpamConfig.bot_id == bot_id)
+                .first()
+            )
+
+            if config and hasattr(config, protection):
+                current_value = getattr(config, protection)
+                setattr(config, protection, not current_value)
+                session.commit()
+                return not current_value  # Retorna o novo valor
+            return False
+
+    @staticmethod
+    def to_dict(config) -> dict:
+        """Converte config para dicionário"""
+        if not config:
+            return {}
+
+        return {
+            "dot_after_start": config.dot_after_start,
+            "repetition": config.repetition,
+            "flood": config.flood,
+            "links_mentions": config.links_mentions,
+            "short_messages": config.short_messages,
+            "loop_start": config.loop_start,
+            "total_limit": config.total_limit,
+            "total_limit_value": config.total_limit_value,
+            "forward_spam": config.forward_spam,
+            "emoji_flood": config.emoji_flood,
+            "char_repetition": config.char_repetition,
+            "bot_speed": config.bot_speed,
+            "media_spam": config.media_spam,
+            "sticker_spam": config.sticker_spam,
+            "contact_spam": config.contact_spam,
+            "location_spam": config.location_spam,
+        }

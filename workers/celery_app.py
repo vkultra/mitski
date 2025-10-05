@@ -25,6 +25,19 @@ celery_app.conf.update(
     task_soft_time_limit=240,  # aviso aos 4 minutos
 )
 
+# Configurar rotas de tarefas para queues específicas
+celery_app.conf.task_routes = {
+    "workers.tasks.process_telegram_update": {"queue": "celery"},
+    "workers.tasks.process_manager_update": {"queue": "celery"},
+    "workers.tasks.ban_user_async": {"queue": "bans"},
+    "workers.tasks.send_message": {"queue": "celery"},
+    "workers.tasks.send_welcome": {"queue": "celery"},
+    "workers.tasks.send_rate_limit_message": {"queue": "celery"},
+    "workers.payment_tasks.*": {"queue": "celery"},
+    "workers.ai_tasks.*": {"queue": "celery"},
+    "workers.upsell_tasks.*": {"queue": "celery"},
+}
+
 # Configurar tarefas periódicas (Celery Beat)
 celery_app.conf.beat_schedule = {
     "check-pending-upsells": {
