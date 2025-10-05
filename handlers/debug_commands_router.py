@@ -31,6 +31,10 @@ class DebugCommandRouter:
         if text.lower() in [
             "/vendaaprovada",
             "/venda_aprovada",
+            "/vendaupsell",
+            "/venda_upsell",
+            "/upsellinicial",
+            "/upsell_inicial",
             "/debug_help",
             "/debug",
         ]:
@@ -92,6 +96,34 @@ class DebugCommandRouter:
             # Verificar se tem parâmetro verbose
             verbose = "verbose" in command_lower or "v" in command_lower.split()
             return await DebugCommandHandler.handle_venda_aprovada(
+                bot_id=bot_id,
+                chat_id=chat_id,
+                user_telegram_id=user_telegram_id,
+                bot_token=bot_token,
+                verbose=verbose,
+            )
+
+        # Comando: /vendaupsell (com suporte a verbose)
+        if command_lower.startswith("vendaupsell") or command_lower.startswith(
+            "venda_upsell"
+        ):
+            # Verificar se tem parâmetro verbose
+            verbose = "verbose" in command_lower or "v" in command_lower.split()
+            return await DebugCommandHandler.handle_venda_upsell(
+                bot_id=bot_id,
+                chat_id=chat_id,
+                user_telegram_id=user_telegram_id,
+                bot_token=bot_token,
+                verbose=verbose,
+            )
+
+        # Comando: /upsellinicial (com suporte a verbose)
+        if command_lower.startswith("upsellinicial") or command_lower.startswith(
+            "upsell_inicial"
+        ):
+            # Verificar se tem parâmetro verbose
+            verbose = "verbose" in command_lower or "v" in command_lower.split()
+            return await DebugCommandHandler.handle_upsell_inicial(
                 bot_id=bot_id,
                 chat_id=chat_id,
                 user_telegram_id=user_telegram_id,
@@ -176,9 +208,17 @@ class DebugCommandRouter:
                 {
                     "command": "/vendaaprovada",
                     "description": "Simula pagamento aprovado e entrega conteúdo",
-                }
+                },
+                {
+                    "command": "/vendaupsell",
+                    "description": "Simula pagamento de upsell aprovado e entrega",
+                },
+                {
+                    "command": "/upsellinicial",
+                    "description": "Simula trigger detectado e envia anúncio",
+                },
             ],
             "action_commands": action_commands,
             "offer_commands": offer_commands,
-            "total": 1 + len(action_commands) + len(offer_commands),
+            "total": 3 + len(action_commands) + len(offer_commands),
         }

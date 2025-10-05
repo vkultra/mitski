@@ -325,6 +325,275 @@ class DebugCommandHandler:
             )
             return {"success": False, "error": str(e)}
 
+    @staticmethod
+    async def handle_venda_upsell(
+        bot_id: int,
+        chat_id: int,
+        user_telegram_id: int,
+        bot_token: str,
+        upsell_name: Optional[str] = None,
+        verbose: bool = False,
+    ) -> Dict:
+        """
+        Simula pagamento de upsell aprovado e entrega conteúdo
+
+        Args:
+            bot_id: ID do bot
+            chat_id: ID do chat
+            user_telegram_id: ID do usuário
+            bot_token: Token do bot
+            upsell_name: Nome do upsell (opcional, pega o primeiro se não especificado)
+            verbose: Se True, mostra mensagens de debug (default: False)
+
+        Returns:
+            Dict com resultado da simulação
+        """
+        try:
+            from database.repos import (
+                UpsellDeliverableBlockRepository,
+                UpsellRepository,
+                UserUpsellHistoryRepository,
+            )
+
+            logger.info(
+                "Debug: Simulando venda de upsell aprovada",
+                extra={
+                    "bot_id": bot_id,
+                    "chat_id": chat_id,
+                    "user_telegram_id": user_telegram_id,
+                    "upsell_name": upsell_name,
+                },
+            )
+
+            # Buscar upsell
+            if upsell_name:
+                # Buscar por nome (implementar método no repo se necessário)
+                upsells = await UpsellRepository.get_upsells_by_bot(bot_id)
+                upsell = next((u for u in upsells if u.name == upsell_name), None)
+            else:
+                # Pegar primeiro upsell ativo do bot
+                upsells = await UpsellRepository.get_upsells_by_bot(bot_id)
+                upsell = upsells[0] if upsells else None
+
+            if not upsell:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    "⚠️ Nenhum upsell encontrado para simular venda.",
+                )
+                return {"success": False, "error": "no_upsell_found"}
+
+            # Buscar blocos de entregável do upsell
+            deliverable_blocks = (
+                await UpsellDeliverableBlockRepository.get_blocks_by_upsell(upsell.id)
+            )
+
+            if not deliverable_blocks:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"⚠️ O upsell '{upsell.name}' não tem conteúdo de entrega configurado.",
+                )
+                return {"success": False, "error": "no_deliverable_content"}
+
+            # Simular transação paga (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Simulando pagamento aprovado para upsell: {upsell.name}\n"
+                    f"💰 Valor: {upsell.value or 'Sem valor definido'}\n\n"
+                    f"Entregando conteúdo...",
+                )
+
+            # Usar DeliverableSender igual ao sistema real
+            from services.upsell.deliverable_sender import DeliverableSender
+
+            sender = DeliverableSender(bot_token)
+            await sender.send_deliverable(
+                upsell_id=upsell.id,
+                chat_id=chat_id,
+                bot_id=bot_id,
+            )
+
+            # Marcar como pago no histórico
+            await UserUpsellHistoryRepository.mark_paid(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                upsell_id=upsell.id,
+                transaction_id=f"debug_{upsell.id}_{user_telegram_id}",
+            )
+
+            # Agendar próximo upsell (como no fluxo real)
+            from services.upsell.scheduler import UpsellScheduler
+
+            await UpsellScheduler.schedule_next_upsell(user_telegram_id, bot_id)
+
+            # Mensagem de confirmação (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Entrega concluída!\n"
+                    f"📦 {len(deliverable_blocks)} blocos entregues\n"
+                    f"🎯 Debug /vendaupsell executado com sucesso",
+                )
+
+            return {
+                "success": True,
+                "upsell_id": upsell.id,
+                "upsell_name": upsell.name,
+                "blocks_sent": len(deliverable_blocks),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Erro no comando debug /vendaupsell",
+                extra={"error": str(e), "bot_id": bot_id},
+            )
+            await TelegramAPI().send_message(
+                bot_token, chat_id, f"❌ Erro ao simular venda de upsell: {str(e)}"
+            )
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def handle_upsell_inicial(
+        bot_id: int,
+        chat_id: int,
+        user_telegram_id: int,
+        bot_token: str,
+        verbose: bool = False,
+    ) -> Dict:
+        """
+        Simula detecção de trigger pela IA e envia anúncio do upsell inicial
+
+        Args:
+            bot_id: ID do bot
+            chat_id: ID do chat
+            user_telegram_id: ID do usuário
+            bot_token: Token do bot
+            verbose: Se True, mostra mensagens de debug (default: False)
+
+        Returns:
+            Dict com resultado da simulação
+        """
+        try:
+            from database.repos import (
+                UpsellAnnouncementBlockRepository,
+                UpsellRepository,
+                UserUpsellHistoryRepository,
+            )
+
+            logger.info(
+                "Debug: Simulando trigger de upsell inicial detectado",
+                extra={
+                    "bot_id": bot_id,
+                    "chat_id": chat_id,
+                    "user_telegram_id": user_telegram_id,
+                },
+            )
+
+            # Buscar upsell #1 (pré-salvo)
+            upsell_1 = await UpsellRepository.get_first_upsell(bot_id)
+
+            if not upsell_1:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    "⚠️ Nenhum upsell inicial (#1) encontrado.\n"
+                    "O upsell #1 é criado automaticamente ao cadastrar um bot.",
+                )
+                return {"success": False, "error": "no_initial_upsell"}
+
+            # Verificar se tem trigger configurado
+            if not upsell_1.upsell_trigger:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"⚠️ O upsell '{upsell_1.name}' não tem trigger configurado.\n"
+                    f"Configure o trigger no menu de upsells.",
+                )
+                return {"success": False, "error": "no_trigger_configured"}
+
+            # Buscar blocos de anúncio
+            announcement_blocks = (
+                await UpsellAnnouncementBlockRepository.get_blocks_by_upsell(
+                    upsell_1.id
+                )
+            )
+
+            if not announcement_blocks:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"⚠️ O upsell '{upsell_1.name}' não tem blocos de anúncio configurados.",
+                )
+                return {"success": False, "error": "no_announcement_blocks"}
+
+            # Mensagem de debug (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"🎯 Simulando trigger detectado: '{upsell_1.upsell_trigger}'\n"
+                    f"📢 Upsell: {upsell_1.name}\n"
+                    f"💰 Valor: {upsell_1.value or 'Sem valor definido'}\n\n"
+                    f"Ativando fase e enviando anúncio...",
+                )
+
+            # Ativar fase do upsell (trocar prompt da IA)
+            from services.upsell.phase_manager import UpsellPhaseManager
+
+            await UpsellPhaseManager.activate_upsell_phase(
+                bot_id, user_telegram_id, upsell_1.id
+            )
+
+            # Enviar anúncio
+            from services.upsell.announcement_sender import AnnouncementSender
+
+            sender = AnnouncementSender(bot_token)
+            await sender.send_announcement(
+                upsell_id=upsell_1.id,
+                chat_id=chat_id,
+                bot_id=bot_id,
+            )
+
+            # Marcar como enviado no histórico
+            await UserUpsellHistoryRepository.mark_sent(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                upsell_id=upsell_1.id,
+            )
+
+            # Mensagem de confirmação (apenas se verbose)
+            if verbose:
+                await TelegramAPI().send_message(
+                    bot_token,
+                    chat_id,
+                    f"✅ Anúncio enviado!\n"
+                    f"📦 {len(announcement_blocks)} blocos enviados\n"
+                    f"🔄 Fase da IA ativada\n"
+                    f"🎯 Debug /upsellinicial executado com sucesso",
+                )
+
+            return {
+                "success": True,
+                "upsell_id": upsell_1.id,
+                "upsell_name": upsell_1.name,
+                "trigger": upsell_1.upsell_trigger,
+                "blocks_sent": len(announcement_blocks),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Erro no comando debug /upsellinicial",
+                extra={"error": str(e), "bot_id": bot_id},
+            )
+            await TelegramAPI().send_message(
+                bot_token, chat_id, f"❌ Erro ao simular trigger de upsell: {str(e)}"
+            )
+            return {"success": False, "error": str(e)}
+
 
 async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
     """
@@ -359,6 +628,12 @@ async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
             "• `/vendaaprovada` - Simula pagamento aprovado e entrega conteúdo\n"
         )
         help_text += "• `/debug_help` - Mostra esta lista de comandos\n\n"
+
+        help_text += "💰 **Comandos de Upsell:**\n"
+        help_text += (
+            "• `/vendaupsell` - Simula pagamento de upsell aprovado e entrega\n"
+        )
+        help_text += "• `/upsellinicial` - Simula trigger detectado e envia anúncio\n\n"
 
         if actions:
             help_text += "🎯 **Ações Personalizadas:**\n"
