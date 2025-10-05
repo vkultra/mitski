@@ -252,6 +252,25 @@ class AIConversationService:
             # Retornar None para indicar que a mensagem foi substituída
             return None
 
+        # 14. Verificar trigger de upsell
+        from services.upsell import TriggerDetector
+        from workers.upsell_tasks import send_upsell_announcement_triggered
+
+        upsell_id = await TriggerDetector.detect_upsell_trigger(bot_id, answer)
+        if upsell_id:
+            logger.info(
+                "Upsell trigger detected",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "upsell_id": upsell_id,
+                },
+            )
+            # Disparar task assíncrona para enviar anúncio do upsell
+            send_upsell_announcement_triggered.delay(
+                bot_id, user_telegram_id, upsell_id
+            )
+
         # Se deve adicionar pitch após a mensagem, adicionar marcador
         # Será processado em ai_tasks.py para evitar enviar o sufixo ao usuário
         if offer_result and offer_result.get("should_append_pitch"):
@@ -327,6 +346,21 @@ class AIConversationService:
 
         if current_phase:
             system_prompt += f"\n\n{current_phase.phase_prompt}"
+
+        # Verificar se há upsell ativo (sobrescreve fase se houver)
+        from services.upsell import UpsellPhaseManager
+
+        active_upsell_id = await UpsellPhaseManager.get_active_upsell(
+            bot_id, user_telegram_id
+        )
+        if active_upsell_id:
+            from database.repos import UpsellPhaseConfigRepository
+
+            upsell_phase = await UpsellPhaseConfigRepository.get_phase_config(
+                active_upsell_id
+            )
+            if upsell_phase and upsell_phase.phase_prompt:
+                system_prompt += f"\n\n{upsell_phase.phase_prompt}"
 
         # Adicionar status das ações rastreadas ao prompt
         from services.ai.actions import ActionService

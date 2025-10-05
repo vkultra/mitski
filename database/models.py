@@ -267,7 +267,10 @@ class PixTransaction(Base):
     user_telegram_id = Column(BigInteger, nullable=False)
     chat_id = Column(BigInteger, nullable=False)
     offer_id = Column(
-        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True
+    )
+    upsell_id = Column(
+        Integer, ForeignKey("upsells.id", ondelete="CASCADE"), nullable=True
     )
 
     # Dados da transação PushinPay
@@ -433,4 +436,137 @@ class UserActionStatus(Base):
             unique=True,
         ),
         Index("idx_action_status", "action_id", "status"),
+    )
+
+
+class Upsell(Base):
+    """Modelo de Upsell"""
+
+    __tablename__ = "upsells"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(128), nullable=False)
+    upsell_trigger = Column(String(128))  # Trigger para #1 (nome que IA menciona)
+    value = Column(String(32))  # Valor formatado (R$ 19,90)
+    order = Column(Integer, nullable=False)  # 1, 2, 3...
+    is_pre_saved = Column(Boolean, default=False)  # True para linha 1
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_bot_upsell_order", "bot_id", "order", unique=True),
+        Index("idx_bot_active_upsells", "bot_id", "is_active"),
+    )
+
+
+class UpsellAnnouncementBlock(Base):
+    """Blocos de mensagem do anúncio de upsell"""
+
+    __tablename__ = "upsell_announcement_blocks"
+
+    id = Column(Integer, primary_key=True)
+    upsell_id = Column(
+        Integer, ForeignKey("upsells.id", ondelete="CASCADE"), nullable=False
+    )
+    order = Column(Integer, nullable=False)  # Ordem de envio (1, 2, 3...)
+
+    # Conteúdo da mensagem
+    text = Column(String(4096))  # Texto ou legenda
+    media_file_id = Column(String(256))  # file_id do Telegram
+    media_type = Column(String(32))  # 'photo', 'video', 'audio', 'gif', 'document'
+
+    # Efeitos
+    delay_seconds = Column(Integer, default=0)  # Delay antes de enviar
+    auto_delete_seconds = Column(Integer, default=0)  # Auto-deletar após X segundos
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_upsell_announcement_order", "upsell_id", "order"),)
+
+
+class UpsellDeliverableBlock(Base):
+    """Blocos de mensagem do entregável de upsell"""
+
+    __tablename__ = "upsell_deliverable_blocks"
+
+    id = Column(Integer, primary_key=True)
+    upsell_id = Column(
+        Integer, ForeignKey("upsells.id", ondelete="CASCADE"), nullable=False
+    )
+    order = Column(Integer, nullable=False)  # Ordem de envio (1, 2, 3...)
+
+    # Conteúdo da mensagem
+    text = Column(String(4096))  # Texto ou legenda
+    media_file_id = Column(String(256))  # file_id do Telegram
+    media_type = Column(String(32))  # 'photo', 'video', 'audio', 'gif', 'document'
+
+    # Efeitos
+    delay_seconds = Column(Integer, default=0)  # Delay antes de enviar
+    auto_delete_seconds = Column(Integer, default=0)  # Auto-deletar após X segundos
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_upsell_deliverable_order", "upsell_id", "order"),)
+
+
+class UpsellPhaseConfig(Base):
+    """Configuração de fase do upsell"""
+
+    __tablename__ = "upsell_phase_configs"
+
+    id = Column(Integer, primary_key=True)
+    upsell_id = Column(
+        Integer,
+        ForeignKey("upsells.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    phase_prompt = Column(String(4096), nullable=False)  # Prompt da fase
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+
+class UpsellSchedule(Base):
+    """Agendamento de upsell"""
+
+    __tablename__ = "upsell_schedules"
+
+    id = Column(Integer, primary_key=True)
+    upsell_id = Column(
+        Integer,
+        ForeignKey("upsells.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    is_immediate = Column(Boolean, default=False)  # True apenas para #1
+    days_after = Column(Integer, default=0)  # Para #2+
+    hours = Column(Integer, default=0)
+    minutes = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+
+class UserUpsellHistory(Base):
+    """Histórico de upsells por usuário"""
+
+    __tablename__ = "user_upsell_history"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_telegram_id = Column(BigInteger, nullable=False)
+    upsell_id = Column(
+        Integer, ForeignKey("upsells.id", ondelete="CASCADE"), nullable=False
+    )
+    sent_at = Column(DateTime)  # Quando anúncio foi enviado
+    paid_at = Column(DateTime)  # Quando usuário pagou
+    transaction_id = Column(String(128))  # ID da transação PIX
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_bot_user_upsell", "bot_id", "user_telegram_id", "upsell_id"),
+        Index("idx_sent_status", "bot_id", "sent_at"),
     )

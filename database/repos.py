@@ -1247,13 +1247,14 @@ class PixTransactionRepository:
         bot_id: int,
         user_telegram_id: int,
         chat_id: int,
-        offer_id: int,
-        transaction_id: str,
-        qr_code: str,
-        value_cents: int,
+        offer_id: int = None,
+        upsell_id: int = None,
+        transaction_id: str = None,
+        qr_code: str = None,
+        value_cents: int = None,
         qr_code_base64: str = None,
     ):
-        """Cria nova transação PIX"""
+        """Cria nova transação PIX (para oferta OU upsell)"""
         from .models import PixTransaction
 
         with SessionLocal() as session:
@@ -1262,6 +1263,7 @@ class PixTransactionRepository:
                 user_telegram_id=user_telegram_id,
                 chat_id=chat_id,
                 offer_id=offer_id,
+                upsell_id=upsell_id,
                 transaction_id=transaction_id,
                 qr_code=qr_code,
                 qr_code_base64=qr_code_base64,
@@ -1447,6 +1449,51 @@ class PixTransactionRepository:
                     PixTransaction.status.in_(["created", "pending"]),
                 )
                 .order_by(PixTransaction.created_at.desc())
+                .all()
+            )
+
+    @staticmethod
+    def get_pending_by_user_and_upsell_sync(
+        bot_id: int, user_telegram_id: int, upsell_id: int, minutes_ago: int = 15
+    ) -> List:
+        """Busca transações PIX pendentes de um usuário em um upsell"""
+        from datetime import datetime, timedelta
+
+        from .models import PixTransaction
+
+        cutoff_time = datetime.utcnow() - timedelta(minutes=minutes_ago)
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(
+                    PixTransaction.bot_id == bot_id,
+                    PixTransaction.user_telegram_id == user_telegram_id,
+                    PixTransaction.upsell_id == upsell_id,
+                    PixTransaction.created_at >= cutoff_time,
+                    PixTransaction.status.in_(["created", "pending"]),
+                )
+                .order_by(PixTransaction.created_at.desc())
+                .all()
+            )
+
+    @staticmethod
+    def get_pending_upsell_transactions_sync(limit_minutes: int = 10):
+        """Busca transações de upsell pendentes para verificação (sync)"""
+        from datetime import datetime, timedelta
+
+        from .models import PixTransaction
+
+        cutoff_time = datetime.utcnow() - timedelta(minutes=limit_minutes)
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(
+                    PixTransaction.upsell_id.isnot(None),
+                    PixTransaction.status == "created",
+                    PixTransaction.created_at >= cutoff_time,
+                )
                 .all()
             )
 
@@ -2102,3 +2149,776 @@ class UserActionStatusRepository:
                     status_dict[action_id] = "INACTIVE"
 
             return status_dict
+
+
+class UpsellRepository:
+    """Repository para gerenciar Upsells"""
+
+    @staticmethod
+    async def get_upsells_by_bot(bot_id: int):
+        """Retorna todos os upsells de um bot ordenados"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            upsells = (
+                session.query(Upsell)
+                .filter(Upsell.bot_id == bot_id, Upsell.is_active == True)  # noqa: E712
+                .order_by(Upsell.order)
+                .all()
+            )
+            return upsells
+
+    @staticmethod
+    async def get_upsell_by_id(upsell_id: int):
+        """Retorna upsell por ID"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            return session.query(Upsell).filter(Upsell.id == upsell_id).first()
+
+    @staticmethod
+    def get_upsell_by_id_sync(upsell_id: int):
+        """Versão síncrona"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            return session.query(Upsell).filter(Upsell.id == upsell_id).first()
+
+    @staticmethod
+    async def get_first_upsell(bot_id: int):
+        """Retorna upsell #1 pré-salvo"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            return (
+                session.query(Upsell)
+                .filter(Upsell.bot_id == bot_id, Upsell.is_pre_saved.is_(True))
+                .first()
+            )
+
+    @staticmethod
+    def get_first_upsell_sync(bot_id: int):
+        """Versão síncrona"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            return (
+                session.query(Upsell)
+                .filter(Upsell.bot_id == bot_id, Upsell.is_pre_saved.is_(True))
+                .first()
+            )
+
+    @staticmethod
+    async def create_upsell(
+        bot_id: int, name: str, order: int, is_pre_saved: bool = False
+    ):
+        """Cria novo upsell"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            upsell = Upsell(
+                bot_id=bot_id,
+                name=name,
+                order=order,
+                is_pre_saved=is_pre_saved,
+                is_active=True,
+            )
+            session.add(upsell)
+            session.commit()
+            session.refresh(upsell)
+            return upsell
+
+    @staticmethod
+    async def create_default_upsell(bot_id: int):
+        """Cria upsell #1 pré-salvo ao criar bot"""
+        from .models import Upsell, UpsellSchedule
+
+        with SessionLocal() as session:
+            upsell = Upsell(
+                bot_id=bot_id,
+                name="Upsell Imediato",
+                order=1,
+                is_pre_saved=True,
+                is_active=True,
+            )
+            session.add(upsell)
+            session.flush()
+
+            schedule = UpsellSchedule(upsell_id=upsell.id, is_immediate=True)
+            session.add(schedule)
+            session.commit()
+            session.refresh(upsell)
+            return upsell
+
+    @staticmethod
+    def create_default_upsell_sync(bot_id: int):
+        """Versão síncrona"""
+        from .models import Upsell, UpsellSchedule
+
+        with SessionLocal() as session:
+            upsell = Upsell(
+                bot_id=bot_id,
+                name="Upsell Imediato",
+                order=1,
+                is_pre_saved=True,
+                is_active=True,
+            )
+            session.add(upsell)
+            session.flush()
+
+            schedule = UpsellSchedule(upsell_id=upsell.id, is_immediate=True)
+            session.add(schedule)
+            session.commit()
+            session.refresh(upsell)
+            return upsell
+
+    @staticmethod
+    async def update_upsell(upsell_id: int, **kwargs):
+        """Atualiza campos do upsell"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            upsell = session.query(Upsell).filter(Upsell.id == upsell_id).first()
+            if not upsell:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(upsell, key):
+                    setattr(upsell, key, value)
+
+            session.commit()
+            session.refresh(upsell)
+            return upsell
+
+    @staticmethod
+    async def delete_upsell(upsell_id: int):
+        """Deleta upsell"""
+        from .models import Upsell
+
+        with SessionLocal() as session:
+            upsell = session.query(Upsell).filter(Upsell.id == upsell_id).first()
+            if upsell and not upsell.is_pre_saved:
+                session.delete(upsell)
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def get_next_pending_upsell(bot_id: int, user_telegram_id: int):
+        """Retorna próximo upsell não enviado"""
+        from .models import Upsell, UserUpsellHistory
+
+        with SessionLocal() as session:
+            sent_upsells = (
+                session.query(UserUpsellHistory.upsell_id)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                )
+                .all()
+            )
+            sent_ids = [u[0] for u in sent_upsells]
+
+            return (
+                session.query(Upsell)
+                .filter(
+                    Upsell.bot_id == bot_id,
+                    Upsell.is_active == True,  # noqa: E712
+                    Upsell.id.notin_(sent_ids) if sent_ids else True,
+                )
+                .order_by(Upsell.order)
+                .first()
+            )
+
+    @staticmethod
+    def get_next_pending_upsell_sync(bot_id: int, user_telegram_id: int):
+        """Versão síncrona - Retorna próximo upsell não enviado"""
+        from .models import Upsell, UserUpsellHistory
+
+        with SessionLocal() as session:
+            sent_upsells = (
+                session.query(UserUpsellHistory.upsell_id)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                )
+                .all()
+            )
+            sent_ids = [u[0] for u in sent_upsells]
+
+            return (
+                session.query(Upsell)
+                .filter(
+                    Upsell.bot_id == bot_id,
+                    Upsell.is_active == True,  # noqa: E712
+                    Upsell.id.notin_(sent_ids) if sent_ids else True,
+                )
+                .order_by(Upsell.order)
+                .first()
+            )
+
+
+class UpsellAnnouncementBlockRepository:
+    """Repository para blocos de anúncio de upsell"""
+
+    @staticmethod
+    async def get_blocks_by_upsell(upsell_id: int):
+        """Retorna blocos ordenados"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.upsell_id == upsell_id)
+                .order_by(UpsellAnnouncementBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    def get_blocks_by_upsell_sync(upsell_id: int):
+        """Versão síncrona"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.upsell_id == upsell_id)
+                .order_by(UpsellAnnouncementBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int):
+        """Retorna bloco por ID"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    def get_block_by_id_sync(block_id: int):
+        """Versão síncrona - Retorna bloco por ID"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def create_block(upsell_id: int, order: int, **kwargs):
+        """Cria novo bloco"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            block = UpsellAnnouncementBlock(
+                upsell_id=upsell_id,
+                order=order,
+                text=kwargs.get("text"),
+                media_file_id=kwargs.get("media_file_id"),
+                media_type=kwargs.get("media_type"),
+                delay_seconds=kwargs.get("delay_seconds", 0),
+                auto_delete_seconds=kwargs.get("auto_delete_seconds", 0),
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs):
+        """Atualiza bloco"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.id == block_id)
+                .first()
+            )
+            if not block:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(block, key):
+                    setattr(block, key, value)
+
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def delete_block(block_id: int):
+        """Deleta bloco"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.id == block_id)
+                .first()
+            )
+            if block:
+                session.delete(block)
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def count_blocks(upsell_id: int) -> int:
+        """Conta blocos de um upsell"""
+        from .models import UpsellAnnouncementBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellAnnouncementBlock)
+                .filter(UpsellAnnouncementBlock.upsell_id == upsell_id)
+                .count()
+            )
+
+
+class UpsellDeliverableBlockRepository:
+    """Repository para blocos de entrega de upsell"""
+
+    @staticmethod
+    async def get_blocks_by_upsell(upsell_id: int):
+        """Retorna blocos ordenados"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.upsell_id == upsell_id)
+                .order_by(UpsellDeliverableBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    def get_blocks_by_upsell_sync(upsell_id: int):
+        """Versão síncrona"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.upsell_id == upsell_id)
+                .order_by(UpsellDeliverableBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int):
+        """Retorna bloco por ID"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    def get_block_by_id_sync(block_id: int):
+        """Versão síncrona - Retorna bloco por ID"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def create_block(upsell_id: int, order: int, **kwargs):
+        """Cria novo bloco"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            block = UpsellDeliverableBlock(
+                upsell_id=upsell_id,
+                order=order,
+                text=kwargs.get("text"),
+                media_file_id=kwargs.get("media_file_id"),
+                media_type=kwargs.get("media_type"),
+                delay_seconds=kwargs.get("delay_seconds", 0),
+                auto_delete_seconds=kwargs.get("auto_delete_seconds", 0),
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs):
+        """Atualiza bloco"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.id == block_id)
+                .first()
+            )
+            if not block:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(block, key):
+                    setattr(block, key, value)
+
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def delete_block(block_id: int):
+        """Deleta bloco"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.id == block_id)
+                .first()
+            )
+            if block:
+                session.delete(block)
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def count_blocks(upsell_id: int) -> int:
+        """Conta blocos de um upsell"""
+        from .models import UpsellDeliverableBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellDeliverableBlock)
+                .filter(UpsellDeliverableBlock.upsell_id == upsell_id)
+                .count()
+            )
+
+
+class UpsellPhaseConfigRepository:
+    """Repository para configuração de fase de upsell"""
+
+    @staticmethod
+    async def get_phase_config(upsell_id: int):
+        """Retorna configuração de fase"""
+        from .models import UpsellPhaseConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellPhaseConfig)
+                .filter(UpsellPhaseConfig.upsell_id == upsell_id)
+                .first()
+            )
+
+    @staticmethod
+    def get_phase_config_sync(upsell_id: int):
+        """Versão síncrona"""
+        from .models import UpsellPhaseConfig
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellPhaseConfig)
+                .filter(UpsellPhaseConfig.upsell_id == upsell_id)
+                .first()
+            )
+
+    @staticmethod
+    async def create_or_update_phase(upsell_id: int, phase_prompt: str):
+        """Cria ou atualiza configuração de fase"""
+        from .models import UpsellPhaseConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(UpsellPhaseConfig)
+                .filter(UpsellPhaseConfig.upsell_id == upsell_id)
+                .first()
+            )
+
+            if config:
+                config.phase_prompt = phase_prompt
+            else:
+                config = UpsellPhaseConfig(
+                    upsell_id=upsell_id, phase_prompt=phase_prompt
+                )
+                session.add(config)
+
+            session.commit()
+            session.refresh(config)
+            return config
+
+    @staticmethod
+    async def delete_phase_config(upsell_id: int):
+        """Deleta configuração de fase"""
+        from .models import UpsellPhaseConfig
+
+        with SessionLocal() as session:
+            config = (
+                session.query(UpsellPhaseConfig)
+                .filter(UpsellPhaseConfig.upsell_id == upsell_id)
+                .first()
+            )
+            if config:
+                session.delete(config)
+                session.commit()
+                return True
+            return False
+
+
+class UpsellScheduleRepository:
+    """Repository para agendamento de upsell"""
+
+    @staticmethod
+    async def get_schedule(upsell_id: int):
+        """Retorna agendamento"""
+        from .models import UpsellSchedule
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellSchedule)
+                .filter(UpsellSchedule.upsell_id == upsell_id)
+                .first()
+            )
+
+    @staticmethod
+    def get_schedule_sync(upsell_id: int):
+        """Versão síncrona"""
+        from .models import UpsellSchedule
+
+        with SessionLocal() as session:
+            return (
+                session.query(UpsellSchedule)
+                .filter(UpsellSchedule.upsell_id == upsell_id)
+                .first()
+            )
+
+    @staticmethod
+    async def create_schedule(upsell_id: int, **kwargs):
+        """Cria agendamento"""
+        from .models import UpsellSchedule
+
+        with SessionLocal() as session:
+            schedule = UpsellSchedule(
+                upsell_id=upsell_id,
+                is_immediate=kwargs.get("is_immediate", False),
+                days_after=kwargs.get("days_after", 0),
+                hours=kwargs.get("hours", 0),
+                minutes=kwargs.get("minutes", 0),
+            )
+            session.add(schedule)
+            session.commit()
+            session.refresh(schedule)
+            return schedule
+
+    @staticmethod
+    async def update_schedule(upsell_id: int, **kwargs):
+        """Atualiza agendamento"""
+        from .models import UpsellSchedule
+
+        with SessionLocal() as session:
+            schedule = (
+                session.query(UpsellSchedule)
+                .filter(UpsellSchedule.upsell_id == upsell_id)
+                .first()
+            )
+            if not schedule:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(schedule, key):
+                    setattr(schedule, key, value)
+
+            session.commit()
+            session.refresh(schedule)
+            return schedule
+
+
+class UserUpsellHistoryRepository:
+    """Repository para histórico de upsells por usuário"""
+
+    @staticmethod
+    async def get_user_history(bot_id: int, user_telegram_id: int):
+        """Retorna histórico do usuário"""
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            return (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                )
+                .all()
+            )
+
+    @staticmethod
+    def get_user_history_sync(bot_id: int, user_telegram_id: int):
+        """Versão síncrona"""
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            return (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                )
+                .all()
+            )
+
+    @staticmethod
+    async def mark_sent(bot_id: int, user_telegram_id: int, upsell_id: int):
+        """Marca upsell como enviado"""
+        from datetime import datetime
+
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            history = UserUpsellHistory(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                upsell_id=upsell_id,
+                sent_at=datetime.utcnow(),
+            )
+            session.add(history)
+            session.commit()
+            return history
+
+    @staticmethod
+    def mark_sent_sync(bot_id: int, user_telegram_id: int, upsell_id: int):
+        """Versão síncrona"""
+        from datetime import datetime
+
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            # Verificar se já existe
+            existing = (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                    UserUpsellHistory.upsell_id == upsell_id,
+                )
+                .first()
+            )
+
+            if existing:
+                existing.sent_at = datetime.utcnow()
+                session.commit()
+                return existing
+
+            history = UserUpsellHistory(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                upsell_id=upsell_id,
+                sent_at=datetime.utcnow(),
+            )
+            session.add(history)
+            session.commit()
+            return history
+
+    @staticmethod
+    async def mark_paid(
+        bot_id: int, user_telegram_id: int, upsell_id: int, transaction_id: str
+    ):
+        """Marca upsell como pago"""
+        from datetime import datetime
+
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            history = (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                    UserUpsellHistory.upsell_id == upsell_id,
+                )
+                .first()
+            )
+
+            if history:
+                history.paid_at = datetime.utcnow()
+                history.transaction_id = transaction_id
+                session.commit()
+                return history
+
+            return None
+
+    @staticmethod
+    def mark_paid_sync(
+        bot_id: int, user_telegram_id: int, upsell_id: int, transaction_id: str
+    ):
+        """Versão síncrona"""
+        from datetime import datetime
+
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            history = (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                    UserUpsellHistory.upsell_id == upsell_id,
+                )
+                .first()
+            )
+
+            if history:
+                history.paid_at = datetime.utcnow()
+                history.transaction_id = transaction_id
+                session.commit()
+                return history
+
+            return None
+
+    @staticmethod
+    async def get_last_payment_time(bot_id: int, user_telegram_id: int):
+        """Retorna timestamp do último pagamento"""
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            history = (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                    UserUpsellHistory.paid_at.isnot(None),
+                )
+                .order_by(UserUpsellHistory.paid_at.desc())
+                .first()
+            )
+            return history.paid_at if history else None
+
+    @staticmethod
+    async def has_received_upsell(
+        bot_id: int, user_telegram_id: int, upsell_id: int
+    ) -> bool:
+        """Verifica se usuário já recebeu upsell"""
+        from .models import UserUpsellHistory
+
+        with SessionLocal() as session:
+            return (
+                session.query(UserUpsellHistory)
+                .filter(
+                    UserUpsellHistory.bot_id == bot_id,
+                    UserUpsellHistory.user_telegram_id == user_telegram_id,
+                    UserUpsellHistory.upsell_id == upsell_id,
+                )
+                .count()
+                > 0
+            )

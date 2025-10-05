@@ -169,6 +169,15 @@ class PaymentVerifier:
                 },
             )
 
+            # Ativar fluxo de upsell se for primeiro pagamento
+            from workers.upsell_tasks import activate_upsell_flow
+
+            activate_upsell_flow.delay(
+                user_id=transaction.user_telegram_id,
+                bot_id=transaction.bot_id,
+                transaction_id=transaction_id,
+            )
+
             return True
 
         except Exception as e:

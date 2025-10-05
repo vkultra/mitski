@@ -104,6 +104,15 @@ class DebugCommandHandler:
                 bot_id=bot_id,
             )
 
+            # Ativar fluxo de upsell (simular cenário real)
+            from workers.upsell_tasks import activate_upsell_flow
+
+            activate_upsell_flow.delay(
+                user_id=user_telegram_id,
+                bot_id=bot_id,
+                transaction_id=0,  # ID fictício para debug
+            )
+
             # Mensagem de confirmação (apenas se verbose)
             if verbose:
                 await TelegramAPI().send_message(

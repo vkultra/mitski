@@ -478,6 +478,230 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.gateway import handle_delete_token
 
             response = asyncio.run(handle_delete_token(user_id))
+        # Upsell menu callbacks
+        elif callback_data.startswith("upsell_menu:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.upsell.menu_handlers import handle_upsell_menu
+
+            response = asyncio.run(handle_upsell_menu(user_id, bot_id))
+        elif callback_data.startswith("upsell_menu_page:"):
+            parts = callback_data.split(":")
+            bot_id = int(parts[1])
+            page = int(parts[2])
+            from handlers.upsell.menu_handlers import handle_upsell_menu_page
+
+            response = asyncio.run(handle_upsell_menu_page(user_id, bot_id, page))
+        elif callback_data.startswith("upsell_select:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.menu_handlers import handle_upsell_select
+
+            response = asyncio.run(handle_upsell_select(user_id, upsell_id))
+        elif callback_data.startswith("upsell_add:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.upsell.menu_handlers import handle_add_upsell
+
+            response = asyncio.run(handle_add_upsell(user_id, bot_id))
+        elif callback_data.startswith("upsell_delete_menu:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.upsell.menu_handlers import handle_delete_upsell_menu
+
+            response = asyncio.run(handle_delete_upsell_menu(user_id, bot_id))
+        elif callback_data.startswith("upsell_delete_confirm:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.menu_handlers import handle_delete_upsell_confirm
+
+            response = asyncio.run(handle_delete_upsell_confirm(user_id, upsell_id))
+        elif callback_data.startswith("upsell_announcement:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import handle_announcement_menu
+
+            response = asyncio.run(handle_announcement_menu(user_id, upsell_id))
+        elif callback_data.startswith("upsell_ann_add:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_add_announcement_block,
+            )
+
+            response = asyncio.run(handle_add_announcement_block(user_id, upsell_id))
+        elif callback_data.startswith("upsell_ann_view:"):
+            block_id = int(callback_data.split(":")[1])
+            # View button redirects to announcement menu (no separate view)
+            from database.repos import UpsellAnnouncementBlockRepository
+            from handlers.upsell.announcement_handlers import handle_announcement_menu
+
+            block = UpsellAnnouncementBlockRepository.get_block_by_id_sync(block_id)
+            if block:
+                response = asyncio.run(
+                    handle_announcement_menu(user_id, block.upsell_id)
+                )
+            else:
+                response = {"text": "❌ Bloco não encontrado.", "keyboard": None}
+        elif callback_data.startswith("upsell_ann_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_announcement_effects_click,
+            )
+
+            response = asyncio.run(handle_announcement_effects_click(user_id, block_id))
+        elif callback_data.startswith("upsell_ann_preview:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_preview_announcement,
+            )
+
+            response = asyncio.run(handle_preview_announcement(user_id, upsell_id))
+        elif callback_data.startswith("upsell_ann_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_announcement_text_click,
+            )
+
+            response = asyncio.run(handle_announcement_text_click(user_id, block_id))
+        elif callback_data.startswith("upsell_ann_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_announcement_media_click,
+            )
+
+            response = asyncio.run(handle_announcement_media_click(user_id, block_id))
+        elif callback_data.startswith("upsell_ann_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_announcement_delay_click,
+            )
+
+            response = asyncio.run(handle_announcement_delay_click(user_id, block_id))
+        elif callback_data.startswith("upsell_ann_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_announcement_autodel_click,
+            )
+
+            response = asyncio.run(handle_announcement_autodel_click(user_id, block_id))
+        elif callback_data.startswith("upsell_ann_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.announcement_handlers import (
+                handle_delete_announcement_block,
+            )
+
+            response = asyncio.run(handle_delete_announcement_block(user_id, block_id))
+        elif callback_data.startswith("upsell_deliverable:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import handle_deliverable_menu
+
+            response = asyncio.run(handle_deliverable_menu(user_id, upsell_id))
+        elif callback_data.startswith("upsell_del_add:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_add_deliverable_block,
+            )
+
+            response = asyncio.run(handle_add_deliverable_block(user_id, upsell_id))
+        elif callback_data.startswith("upsell_del_view:"):
+            block_id = int(callback_data.split(":")[1])
+            # View button redirects to deliverable menu (no separate view)
+            from database.repos import UpsellDeliverableBlockRepository
+            from handlers.upsell.deliverable_handlers import handle_deliverable_menu
+
+            block = UpsellDeliverableBlockRepository.get_block_by_id_sync(block_id)
+            if block:
+                response = asyncio.run(
+                    handle_deliverable_menu(user_id, block.upsell_id)
+                )
+            else:
+                response = {"text": "❌ Bloco não encontrado.", "keyboard": None}
+        elif callback_data.startswith("upsell_del_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_deliverable_effects_click,
+            )
+
+            response = asyncio.run(handle_deliverable_effects_click(user_id, block_id))
+        elif callback_data.startswith("upsell_del_preview:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import handle_preview_deliverable
+
+            response = asyncio.run(handle_preview_deliverable(user_id, upsell_id))
+        elif callback_data.startswith("upsell_del_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_deliverable_text_click,
+            )
+
+            response = asyncio.run(handle_deliverable_text_click(user_id, block_id))
+        elif callback_data.startswith("upsell_del_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_deliverable_media_click,
+            )
+
+            response = asyncio.run(handle_deliverable_media_click(user_id, block_id))
+        elif callback_data.startswith("upsell_del_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_deliverable_delay_click,
+            )
+
+            response = asyncio.run(handle_deliverable_delay_click(user_id, block_id))
+        elif callback_data.startswith("upsell_del_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_deliverable_autodel_click,
+            )
+
+            response = asyncio.run(handle_deliverable_autodel_click(user_id, block_id))
+        elif callback_data.startswith("upsell_del_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.upsell.deliverable_handlers import (
+                handle_delete_deliverable_block,
+            )
+
+            response = asyncio.run(handle_delete_deliverable_block(user_id, block_id))
+        elif callback_data.startswith("upsell_phase:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.phase_handlers import handle_phase_menu
+
+            response = asyncio.run(handle_phase_menu(user_id, upsell_id))
+        elif callback_data.startswith("upsell_phase_edit:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.phase_handlers import handle_phase_edit_click
+
+            response = asyncio.run(handle_phase_edit_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_schedule:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.schedule_handlers import handle_schedule_menu
+
+            response = asyncio.run(handle_schedule_menu(user_id, upsell_id))
+        elif callback_data.startswith("upsell_sched_days:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.schedule_handlers import handle_schedule_days_click
+
+            response = asyncio.run(handle_schedule_days_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_sched_hours:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.schedule_handlers import handle_schedule_hours_click
+
+            response = asyncio.run(handle_schedule_hours_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_sched_minutes:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.schedule_handlers import handle_schedule_minutes_click
+
+            response = asyncio.run(handle_schedule_minutes_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_value:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.value_handlers import handle_value_click
+
+            response = asyncio.run(handle_value_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_trigger:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.trigger_handlers import handle_trigger_menu
+
+            response = asyncio.run(handle_trigger_menu(user_id, upsell_id))
+        elif callback_data.startswith("upsell_trigger_edit:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.trigger_handlers import handle_trigger_edit_click
+
+            response = asyncio.run(handle_trigger_edit_click(user_id, upsell_id))
         # Action menu callbacks
         elif callback_data.startswith("action_menu:"):
             bot_id = int(callback_data.split(":")[1])
@@ -1017,6 +1241,250 @@ def process_manager_update(self, update: dict):  # noqa: C901
                             user_id, data["block_id"], data["offer_id"], text
                         )
                     )
+
+                # Upsell announcement states
+                elif state == "awaiting_upsell_ann_text":
+                    from handlers.upsell.announcement_handlers import (
+                        handle_announcement_text_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_announcement_text_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_upsell_ann_media":
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.upsell.announcement_handlers import (
+                            handle_announcement_media_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_announcement_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["upsell_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Envie uma mídia válida.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_upsell_ann_delay":
+                    from handlers.upsell.announcement_handlers import (
+                        handle_announcement_delay_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_announcement_delay_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_upsell_ann_autodel":
+                    from handlers.upsell.announcement_handlers import (
+                        handle_announcement_autodel_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_announcement_autodel_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                # Upsell deliverable states
+                elif state == "awaiting_upsell_del_text":
+                    from handlers.upsell.deliverable_handlers import (
+                        handle_deliverable_text_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_deliverable_text_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_upsell_del_media":
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.upsell.deliverable_handlers import (
+                            handle_deliverable_media_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_deliverable_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["upsell_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Envie uma mídia válida.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_upsell_del_delay":
+                    from handlers.upsell.deliverable_handlers import (
+                        handle_deliverable_delay_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_deliverable_delay_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_upsell_del_autodel":
+                    from handlers.upsell.deliverable_handlers import (
+                        handle_deliverable_autodel_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_deliverable_autodel_input(
+                            user_id, data["block_id"], data["upsell_id"], text
+                        )
+                    )
+
+                # Upsell phase, schedule, value, trigger states
+                elif state == "awaiting_upsell_phase_prompt":
+                    from handlers.upsell.phase_handlers import handle_phase_prompt_input
+
+                    response = asyncio.run(
+                        handle_phase_prompt_input(user_id, data["upsell_id"], text)  # type: ignore
+                    )
+
+                elif state == "awaiting_upsell_sched_days":
+                    from handlers.upsell.schedule_handlers import (
+                        handle_schedule_days_input,
+                    )
+
+                    try:
+                        days = int(text)
+                        response = asyncio.run(
+                            handle_schedule_days_input(user_id, data["upsell_id"], days)
+                        )
+                    except ValueError:
+                        response = {
+                            "text": "❌ Digite um número válido.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_upsell_sched_hours":
+                    from handlers.upsell.schedule_handlers import (
+                        handle_schedule_hours_input,
+                    )
+
+                    try:
+                        hours = int(text)
+                        response = asyncio.run(
+                            handle_schedule_hours_input(
+                                user_id, data["upsell_id"], hours
+                            )
+                        )
+                    except ValueError:
+                        response = {
+                            "text": "❌ Digite um número válido.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_upsell_sched_minutes":
+                    from handlers.upsell.schedule_handlers import (
+                        handle_schedule_minutes_input,
+                    )
+
+                    try:
+                        minutes = int(text)
+                        response = asyncio.run(
+                            handle_schedule_minutes_input(
+                                user_id, data["upsell_id"], minutes
+                            )
+                        )
+                    except ValueError:
+                        response = {
+                            "text": "❌ Digite um número válido.",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_upsell_value":
+                    from handlers.upsell.value_handlers import handle_value_input
+
+                    response = asyncio.run(
+                        handle_value_input(user_id, data["upsell_id"], text)
+                    )
+
+                elif state == "awaiting_upsell_trigger":
+                    from database.repos import UpsellRepository
+                    from handlers.upsell.trigger_handlers import handle_trigger_input
+
+                    upsell = UpsellRepository.get_upsell_by_id_sync(data["upsell_id"])
+                    if upsell:
+                        response = asyncio.run(
+                            handle_trigger_input(
+                                user_id, data["upsell_id"], upsell.bot_id, text
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Upsell não encontrado.",
+                            "keyboard": None,
+                        }
 
     # Enviar resposta
     if response:

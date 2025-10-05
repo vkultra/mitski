@@ -25,9 +25,18 @@ celery_app.conf.update(
     task_soft_time_limit=240,  # aviso aos 4 minutos
 )
 
+# Configurar tarefas periódicas (Celery Beat)
+celery_app.conf.beat_schedule = {
+    "check-pending-upsells": {
+        "task": "workers.upsell_tasks.check_pending_upsells",
+        "schedule": 300.0,  # 5 minutos
+    },
+}
+
 # Importar tasks para registro
 celery_app.autodiscover_tasks(["workers"])
 
 # Importar tasks explicitamente
 from workers import ai_tasks  # noqa: F401, E402
 from workers import payment_tasks  # noqa: F401, E402
+from workers import upsell_tasks  # noqa: F401, E402

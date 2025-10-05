@@ -96,6 +96,11 @@ class BotRegistrationService:
                 }
             )
 
+            # 4.1. Cria upsell #1 pré-salvo
+            from database.repos import UpsellRepository
+
+            await UpsellRepository.create_default_upsell(bot.id)
+
             # 5. Configura webhook no Telegram
             telegram_api = TelegramAPI()
             webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{bot.id}"

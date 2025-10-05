@@ -43,6 +43,8 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+!.env.example
+!.env.production
 
 # Logs
 *.log
@@ -68,5 +70,38 @@ dmypy.json
 *.pem
 *.key
 *.crt
+*.cer
 secrets/
 credentials.json
+ssl/
+
+# Backups
+backups/
+*.sql
+*.sql.gz
+*.dump
+*.bak
+*.backup
+
+# Docker volumes
+pg_data/
+redis_data/
+postgres_backup/
+nginx_cache/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Media files
+media/
+uploads/
+downloads/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Monitoring
+flower.db

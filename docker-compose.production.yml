@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  # Nginx Proxy Reverso
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - webhook
+    restart: always
+    networks:
+      - app-network
+
+  # Aplicação Principal (FastAPI)
+  webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop
+    expose:
+      - "8000"
+    env_file: .env.production
+    environment:
+      - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # Workers Celery
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker --concurrency=10 -l warning --max-tasks-per-child=1000
+    env_file: .env.production
+    environment:
+      - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save 60 1 --loglevel warning
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    restart: always
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: telegram_bots
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-senha_segura}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    expose:
+      - "5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+      - postgres_backup:/backups
+    restart: always
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d telegram_bots"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # Flower (Monitoramento Celery) - Opcional
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app flower --broker=redis://redis:6379/0 --address=0.0.0.0 --port=5555 --basic_auth=admin:${FLOWER_PASSWORD:-senhaflower}
+    expose:
+      - "5555"
+    env_file: .env.production
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Backup automático (executa diariamente)
+  backup:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: telegram_bots
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-senha_segura}
+    volumes:
+      - postgres_backup:/backups
+      - ./scripts/backup.sh:/backup.sh
+    entrypoint: /bin/sh -c "while true; do /backup.sh; sleep 86400; done"
+    depends_on:
+      - postgres
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_backup:
+    driver: local
+  nginx_cache:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
