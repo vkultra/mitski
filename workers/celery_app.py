@@ -36,12 +36,27 @@ celery_app.conf.task_routes = {
     "workers.payment_tasks.*": {"queue": "celery"},
     "workers.ai_tasks.*": {"queue": "celery"},
     "workers.upsell_tasks.*": {"queue": "celery"},
+    "workers.recovery_scheduler.*": {"queue": "recovery"},
+    "workers.recovery_sender.*": {"queue": "recovery"},
+    # Mirror queues com prioridades
+    "workers.mirror_tasks.mirror_message": {"queue": "mirror"},
+    "workers.mirror_tasks.send_to_mirror_topic": {"queue": "mirror"},
+    "workers.mirror_tasks.add_to_mirror_buffer": {"queue": "mirror"},
+    "workers.mirror_tasks.flush_buffer": {"queue": "mirror"},
+    "workers.mirror_tasks.schedule_buffer_flush": {"queue": "mirror"},
+    "workers.mirror_tasks.recover_orphan_buffers": {"queue": "mirror"},
+    "workers.mirror_tasks.flush_all_buffers": {"queue": "mirror_high"},
+    "workers.mirror_tasks.handle_mirror_control_action": {"queue": "mirror_high"},
 }
 
 # Configurar tarefas periódicas (Celery Beat)
 celery_app.conf.beat_schedule = {
     "check-pending-upsells": {
         "task": "workers.upsell_tasks.check_pending_upsells",
+        "schedule": 300.0,  # 5 minutos
+    },
+    "check-orphan-buffers": {
+        "task": "workers.mirror_tasks.recover_orphan_buffers",
         "schedule": 300.0,  # 5 minutos
     },
 }
@@ -51,5 +66,9 @@ celery_app.autodiscover_tasks(["workers"])
 
 # Importar tasks explicitamente
 from workers import ai_tasks  # noqa: F401, E402
+from workers import mirror_tasks  # noqa: F401, E402
+from workers import notifications  # noqa: F401, E402
 from workers import payment_tasks  # noqa: F401, E402
+from workers import recovery_scheduler  # noqa: F401, E402
+from workers import recovery_sender  # noqa: F401, E402
 from workers import upsell_tasks  # noqa: F401, E402

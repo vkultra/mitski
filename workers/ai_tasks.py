@@ -127,6 +127,19 @@ def process_ai_message(
                 token=bot_token, chat_id=user_telegram_id, text=response_text
             )
 
+            # ESPELHAMENTO: Espelha resposta do bot no grupo
+            import time
+
+            from workers.mirror_tasks import mirror_message
+
+            mirror_msg = {
+                "role": "assistant",
+                "content": response_text,
+                "user_name": "Bot",
+                "timestamp": time.time(),
+            }
+            mirror_message.delay(bot_id, user_telegram_id, mirror_msg)
+
         # Se há oferta para enviar, enviar pitch após a mensagem
         if offer_id_to_send:
             from services.offers.offer_service import OfferService

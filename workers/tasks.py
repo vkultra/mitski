@@ -3,6 +3,7 @@ Tasks assíncronas do Celery
 """
 
 import json
+import time
 
 import requests
 
@@ -32,6 +33,19 @@ def process_telegram_update(self, bot_id: int, update: dict):
 
     if not user_id:
         return
+
+    try:
+        from core.recovery import mark_user_activity
+        from workers.recovery_tasks import schedule_inactivity_check
+
+        inactivity_version = mark_user_activity(bot_id, user_id)
+        schedule_inactivity_check(bot_id, user_id, inactivity_version)
+    except Exception as exc:  # pragma: no cover - proteção
+        inactivity_version = None
+        logger.warning(
+            "Failed to update recovery state",
+            extra={"bot_id": bot_id, "user_id": user_id, "error": str(exc)},
+        )
 
     # Rate limit por bot + usuário
     if not check_rate_limit(bot_id, user_id):
@@ -137,6 +151,38 @@ def process_telegram_update(self, bot_id: int, update: dict):
             )
             return
 
+    # GARANTIR USUÁRIO NO BANCO (necessário para criar tópico no espelhamento)
+    try:
+        from database.repos import UserRepository
+
+        user_from = message.get("from", {})
+        asyncio.run(
+            UserRepository.get_or_create_user(
+                telegram_id=user_id,
+                bot_id=bot_id,
+                username=user_from.get("username"),
+                first_name=user_from.get("first_name"),
+                last_name=user_from.get("last_name"),
+            )
+        )
+    except Exception as e:
+        logger.warning(
+            "Could not ensure user in DB",
+            extra={"bot_id": bot_id, "user_id": user_id, "error": str(e)},
+        )
+
+    # NOVO: Espelhar mensagem no grupo de tópicos
+    from workers.mirror_tasks import mirror_message
+
+    # Prepara mensagem para espelhamento
+    mirror_msg = {
+        "role": "user",
+        "content": text or "[mídia]",
+        "user_name": message.get("from", {}).get("first_name", "Usuário"),
+        "timestamp": message.get("date", time.time()),
+    }
+    mirror_message.delay(bot_id, user_id, mirror_msg)
+
     # NOVO: Verifica se bot tem IA ativada
     ai_config = AIConfigRepository.get_by_bot_id_sync(bot_id)
 
@@ -205,6 +251,53 @@ def process_manager_update(self, update: dict):  # noqa: C901
 
         if callback_data == "add_bot":
             response = asyncio.run(handle_callback_add_bot(user_id))
+        elif callback_data == "notifications_menu":
+            from handlers.notifications.manager_menu import handle_notifications_menu
+
+            response = asyncio.run(handle_notifications_menu(user_id))
+        elif callback_data == "notifications_view":
+            from handlers.notifications.manager_menu import handle_notifications_view
+
+            response = asyncio.run(handle_notifications_view(user_id))
+        elif callback_data == "notifications_configure":
+            from handlers.notifications.manager_menu import handle_notifications_configure
+
+            response = asyncio.run(handle_notifications_configure(user_id))
+        elif callback_data == "notifications_disable":
+            from handlers.notifications.manager_menu import handle_notifications_disable
+
+            response = asyncio.run(handle_notifications_disable(user_id))
+        elif callback_data == "notifications_test":
+            from handlers.notifications.manager_menu import handle_notifications_test
+
+            response = asyncio.run(handle_notifications_test(user_id))
+        elif callback_data == "notifications_configure_default":
+            from handlers.notifications.manager_menu import handle_notifications_configure_scope
+
+            response = asyncio.run(handle_notifications_configure_scope(user_id, None))
+        elif callback_data.startswith("notifications_configure_bot:"):
+            from handlers.notifications.manager_menu import handle_notifications_configure_scope
+
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_notifications_configure_scope(user_id, bot_id))
+        elif callback_data == "notifications_disable_default":
+            from handlers.notifications.manager_menu import handle_notifications_disable_scope
+
+            response = asyncio.run(handle_notifications_disable_scope(user_id, None))
+        elif callback_data.startswith("notifications_disable_bot:"):
+            from handlers.notifications.manager_menu import handle_notifications_disable_scope
+
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_notifications_disable_scope(user_id, bot_id))
+        elif callback_data == "notifications_test_default":
+            from handlers.notifications.manager_menu import handle_notifications_test_scope
+
+            response = asyncio.run(handle_notifications_test_scope(user_id, None))
+        elif callback_data.startswith("notifications_test_bot:"):
+            from handlers.notifications.manager_menu import handle_notifications_test_scope
+
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_notifications_test_scope(user_id, bot_id))
         elif callback_data == "list_bots":
             response = asyncio.run(handle_callback_list_bots(user_id))
         elif callback_data == "deactivate_menu":
@@ -572,6 +665,152 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.gateway import handle_delete_token
 
             response = asyncio.run(handle_delete_token(user_id))
+        # Recovery callbacks
+        elif callback_data.startswith("rec:") or callback_data.startswith("recovery:"):
+            logger.debug(
+                "Recovery callback inbound",
+                extra={"callback_data": callback_data},
+            )
+            from handlers.recovery import (
+                handle_recovery_add_step,
+                handle_recovery_block_add,
+                handle_recovery_block_autodel_click,
+                handle_recovery_block_delay_click,
+                handle_recovery_block_delete,
+                handle_recovery_block_effects_click,
+                handle_recovery_block_media_click,
+                handle_recovery_block_text_click,
+                handle_recovery_bot_menu,
+                handle_recovery_delete_confirm,
+                handle_recovery_delete_step,
+                handle_recovery_entry,
+                handle_recovery_schedule_prompt,
+                handle_recovery_setting_inactivity,
+                handle_recovery_setting_skip_paid,
+                handle_recovery_setting_timezone,
+                handle_recovery_setting_toggle,
+                handle_recovery_settings_menu,
+                handle_recovery_step_preview,
+                handle_recovery_step_view,
+            )
+            from handlers.recovery.callbacks import parse_callback
+
+            try:
+                payload_data = callback_data
+                if callback_data.startswith("recovery:"):
+                    payload_data = callback_data.replace("recovery:", "rec:", 1)
+                recovery_action, recovery_payload = parse_callback(payload_data)
+            except ValueError:
+                response = {
+                    "text": "⚠️ Ação expirada ou inválida.",
+                    "keyboard": None,
+                }
+                logger.warning(
+                    "Recovery callback invalid",
+                    extra={"callback_data": callback_data},
+                )
+            else:
+                action = recovery_action
+                data = recovery_payload
+                logger.debug(
+                    "Recovery callback parsed",
+                    extra={"action": action, "payload": data},
+                )
+                if action == "menu":
+                    page = int(data.get("page", 1))
+                    response = asyncio.run(handle_recovery_entry(user_id, page))
+                elif action == "select_bot":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(handle_recovery_bot_menu(user_id, bot_id))
+                elif action == "step_add":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(handle_recovery_add_step(user_id, bot_id))
+                elif action == "step_view":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(handle_recovery_step_view(user_id, step_id))
+                elif action == "step_schedule":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(
+                        handle_recovery_schedule_prompt(user_id, step_id)
+                    )
+                elif action == "step_delete_confirm":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(
+                        handle_recovery_delete_confirm(user_id, step_id)
+                    )
+                elif action == "step_delete":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(
+                        handle_recovery_delete_step(user_id, step_id)
+                    )
+                elif action == "step_preview":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(
+                        handle_recovery_step_preview(user_id, step_id)
+                    )
+                elif action == "block_add":
+                    step_id = int(data["step_id"])
+                    response = asyncio.run(handle_recovery_block_add(user_id, step_id))
+                elif action == "block_text":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_text_click(user_id, block_id)
+                    )
+                elif action == "block_media":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_media_click(user_id, block_id)
+                    )
+                elif action == "block_effects":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_effects_click(user_id, block_id)
+                    )
+                elif action == "block_delay":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_delay_click(user_id, block_id)
+                    )
+                elif action == "block_autodel":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_autodel_click(user_id, block_id)
+                    )
+                elif action == "block_delete":
+                    block_id = int(data["block_id"])
+                    response = asyncio.run(
+                        handle_recovery_block_delete(user_id, block_id)
+                    )
+                elif action == "settings":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(
+                        handle_recovery_settings_menu(user_id, bot_id)
+                    )
+                elif action == "setting_toggle":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(
+                        handle_recovery_setting_toggle(user_id, bot_id)
+                    )
+                elif action == "setting_inactivity":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(
+                        handle_recovery_setting_inactivity(user_id, bot_id)
+                    )
+                elif action == "setting_timezone":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(
+                        handle_recovery_setting_timezone(user_id, bot_id)
+                    )
+                elif action == "setting_skip_paid":
+                    bot_id = int(data["bot_id"])
+                    response = asyncio.run(
+                        handle_recovery_setting_skip_paid(user_id, bot_id)
+                    )
+                else:
+                    response = {
+                        "text": "⚠️ Ação de recuperação desconhecida.",
+                        "keyboard": None,
+                    }
         # Anti-spam callbacks
         elif callback_data == "antispam_menu":
             from handlers.antispam_handlers import handle_antispam_menu_click
@@ -833,6 +1072,80 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.upsell.trigger_handlers import handle_trigger_edit_click
 
             response = asyncio.run(handle_trigger_edit_click(user_id, upsell_id))
+        # Mirror/Group menu callbacks
+        elif callback_data == "group_menu":
+            from handlers.mirror_handlers import handle_group_menu
+
+            response = asyncio.run(handle_group_menu(user_id))
+        elif callback_data == "group_configure_start":
+            from handlers.mirror_handlers import handle_group_configure_start
+
+            response = asyncio.run(handle_group_configure_start(user_id))
+        elif callback_data == "group_mode_centralized":
+            from handlers.mirror_handlers import handle_group_mode_centralized
+
+            response = asyncio.run(handle_group_mode_centralized(user_id))
+        elif callback_data == "group_mode_individual":
+            from handlers.mirror_handlers import handle_group_mode_individual
+
+            response = asyncio.run(handle_group_mode_individual(user_id))
+        elif callback_data.startswith("group_individual_bot_"):
+            bot_id = int(callback_data.split("_")[-1])
+            from handlers.mirror_handlers import handle_group_individual_bot
+
+            response = asyncio.run(handle_group_individual_bot(user_id, bot_id))
+        elif callback_data.startswith("group_select_bot_"):
+            bot_id = int(callback_data.split("_")[-1])
+            from handlers.mirror_handlers import handle_group_select_bot
+
+            response = asyncio.run(handle_group_select_bot(user_id, bot_id))
+        elif callback_data.startswith("group_add_"):
+            bot_id = int(callback_data.split("_")[-1])
+            from handlers.mirror_handlers import handle_group_add
+
+            response = asyncio.run(handle_group_add(user_id, bot_id))
+        elif callback_data.startswith("group_batch_size_"):
+            parts = callback_data.split("_")
+            bot_id = int(parts[3])
+            value = int(parts[4])
+            from handlers.mirror_handlers import handle_group_batch_update
+
+            response = asyncio.run(
+                handle_group_batch_update(user_id, bot_id, "size", value)
+            )
+        elif callback_data.startswith("group_batch_delay_"):
+            parts = callback_data.split("_")
+            bot_id = int(parts[3])
+            value = int(parts[4])
+            from handlers.mirror_handlers import handle_group_batch_update
+
+            response = asyncio.run(
+                handle_group_batch_update(user_id, bot_id, "delay", value)
+            )
+        elif callback_data.startswith("group_batch_timeout_"):
+            parts = callback_data.split("_")
+            bot_id = int(parts[3])
+            value = int(parts[4])
+            from handlers.mirror_handlers import handle_group_batch_update
+
+            response = asyncio.run(
+                handle_group_batch_update(user_id, bot_id, "timeout", value)
+            )
+        elif callback_data.startswith("group_batch_"):
+            # Precisa vir depois dos mais específicos
+            bot_id = int(callback_data.split("_")[-1])
+            from handlers.mirror_handlers import handle_group_batch_config
+
+            response = asyncio.run(handle_group_batch_config(user_id, bot_id))
+        elif callback_data.startswith("mirror_"):
+            # Callbacks de controle (ban, unban, reset, pause_ai, resume_ai)
+            from handlers.mirror_handlers import handle_mirror_control_callback
+
+            response = asyncio.run(
+                handle_mirror_control_callback(
+                    user_id, callback_data, callback_query["id"]
+                )
+            )
         # Action menu callbacks
         elif callback_data.startswith("action_menu:"):
             bot_id = int(callback_data.split(":")[1])
@@ -948,9 +1261,19 @@ def process_manager_update(self, update: dict):  # noqa: C901
     message = update.get("message", {})
     user_id = message.get("from", {}).get("id")
     chat_id = message.get("chat", {}).get("id")
+    chat_type = message.get("chat", {}).get("type", "")
     text = message.get("text", "")
 
     if not user_id or not chat_id:
+        return
+
+    # IMPORTANTE: Bot gerenciador só processa mensagens de chat PRIVADO
+    # Ignora mensagens de grupos/supergrupos
+    if chat_type not in ("private",):
+        logger.debug(
+            f"Ignoring manager message from non-private chat: {chat_type}",
+            extra={"chat_id": chat_id, "chat_type": chat_type},
+        )
         return
 
     # Roteamento de comandos e estados conversacionais
@@ -1007,6 +1330,18 @@ def process_manager_update(self, update: dict):  # noqa: C901
                 elif state == "awaiting_initial_phase_prompt":
                     response = asyncio.run(
                         handle_initial_phase_prompt_input(user_id, data["bot_id"], text)
+                    )
+
+                elif state == "awaiting_recovery_schedule":
+                    from handlers.recovery import handle_recovery_schedule_input
+
+                    response = asyncio.run(
+                        handle_recovery_schedule_input(
+                            user_id,
+                            data["step_id"],
+                            data["campaign_id"],
+                            text,
+                        )
                     )
 
                 # Offer states
@@ -1097,6 +1432,15 @@ def process_manager_update(self, update: dict):  # noqa: C901
                         )
                     )
 
+                elif state == "awaiting_recovery_block_text":
+                    from handlers.recovery import handle_recovery_block_text_input
+
+                    response = asyncio.run(
+                        handle_recovery_block_text_input(
+                            user_id, data["block_id"], data["step_id"], text
+                        )
+                    )
+
                 elif state == "awaiting_block_media":
                     # Handle media upload
                     photos = message.get("photo", [])
@@ -1133,6 +1477,50 @@ def process_manager_update(self, update: dict):  # noqa: C901
                                 user_id,
                                 data["block_id"],
                                 data["offer_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Por favor, envie uma mídia (foto, vídeo, áudio, gif ou documento).",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_recovery_block_media":
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.recovery import handle_recovery_block_media_input
+
+                        response = asyncio.run(
+                            handle_recovery_block_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["step_id"],
                                 media_file_id,
                                 media_type,
                             )
@@ -1200,12 +1588,30 @@ def process_manager_update(self, update: dict):  # noqa: C901
                         )
                     )
 
+                elif state == "awaiting_recovery_block_delay":
+                    from handlers.recovery import handle_recovery_block_delay_input
+
+                    response = asyncio.run(
+                        handle_recovery_block_delay_input(
+                            user_id, data["block_id"], data["step_id"], text
+                        )
+                    )
+
                 elif state == "awaiting_block_autodel":
                     from handlers.offers import handle_block_autodel_input
 
                     response = asyncio.run(
                         handle_block_autodel_input(
                             user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_recovery_block_autodel":
+                    from handlers.recovery import handle_recovery_block_autodel_input
+
+                    response = asyncio.run(
+                        handle_recovery_block_autodel_input(
+                            user_id, data["block_id"], data["step_id"], text
                         )
                     )
 
@@ -1370,6 +1776,30 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     response = asyncio.run(
                         handle_manual_verification_block_autodel_input(
                             user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+
+                elif state == "awaiting_recovery_inactivity":
+                    from handlers.recovery import handle_recovery_inactivity_input
+
+                    response = asyncio.run(
+                        handle_recovery_inactivity_input(
+                            user_id,
+                            data["campaign_id"],
+                            data["bot_id"],
+                            text,
+                        )
+                    )
+
+                elif state == "awaiting_recovery_timezone":
+                    from handlers.recovery import handle_recovery_timezone_input
+
+                    response = asyncio.run(
+                        handle_recovery_timezone_input(
+                            user_id,
+                            data["campaign_id"],
+                            data["bot_id"],
+                            text,
                         )
                     )
 
@@ -1623,6 +2053,25 @@ def process_manager_update(self, update: dict):  # noqa: C901
 
                     response = asyncio.run(
                         handle_spam_limit_input(user_id, data["bot_id"], text)
+                    )
+
+                # Mirror/Group states
+                elif state == "awaiting_centralized_group_id":
+                    from handlers.mirror_handlers import (
+                        handle_group_centralized_id_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_group_centralized_id_input(user_id, text)
+                    )
+
+                elif state == "awaiting_individual_group_id":
+                    from handlers.mirror_handlers import (
+                        handle_group_individual_id_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_group_individual_id_input(user_id, text)
                     )
 
     # Enviar resposta

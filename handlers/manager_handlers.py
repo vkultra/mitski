@@ -6,27 +6,43 @@ from typing import Any, Dict, Optional
 
 from core.config import settings
 from core.telemetry import logger
+from handlers.recovery.callbacks import build_callback
 from services.bot_registration import BotRegistrationService
 from services.conversation_state import ConversationStateManager
 
 
 async def handle_start(user_id: int) -> Dict[str, Any]:
     """Handler para comando /start - retorna mensagem e teclado"""
+    notifications_row = [[{"text": "🔔 Notificações", "callback_data": "notifications_menu"}]]
+
     if user_id not in settings.allowed_admin_ids_list:
-        return {
-            "text": "⛔ Acesso negado. Este bot é restrito a administradores.",
-            "keyboard": None,
-        }
+        text = (
+            "👋 Bem-vindo!\n\n"
+            "Use o botão abaixo para configurar o canal onde deseja receber as notificações de vendas aprovadas."
+        )
+        return {"text": text, "keyboard": {"inline_keyboard": notifications_row}}
 
     keyboard = {
-        "inline_keyboard": [
-            [{"text": "➕ Adicionar Bot", "callback_data": "add_bot"}],
+        "inline_keyboard": notifications_row
+        + [
+            [{"text": "➕ Adicionar Bot", "callback_data": "add_bot"}]],
+    }
+
+    keyboard["inline_keyboard"].extend(
+        [
             [
                 {"text": "🤖 IA", "callback_data": "ai_menu"},
                 {"text": "💳 Gateway", "callback_data": "gateway_menu"},
             ],
             [
+                {
+                    "text": "🔁 Recuperação",
+                    "callback_data": build_callback("menu", page=1),
+                }
+            ],
+            [
                 {"text": "🛡️ ANTISPAM", "callback_data": "antispam_menu"},
+                {"text": "🪞 Grupo", "callback_data": "group_menu"},
             ],
             [
                 {"text": "⏸️ Pausar", "callback_data": "pause_menu"},
@@ -36,7 +52,7 @@ async def handle_start(user_id: int) -> Dict[str, Any]:
                 {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
             ],
         ]
-    }
+    )
 
     return {
         "text": "👋 Bem-vindo ao Telegram Multi-Bot Manager!\n\nEscolha uma opção abaixo:",
@@ -55,17 +71,23 @@ async def handle_text_input(user_id: int, text: str) -> Optional[Dict[str, Any]]
     Returns:
         Dict com resposta ou None se não há estado
     """
-    if user_id not in settings.allowed_admin_ids_list:
-        return None
-
-    # Recupera estado conversacional
     state_data = ConversationStateManager.get_state(user_id)
 
     if not state_data:
+        if user_id not in settings.allowed_admin_ids_list:
+            return None
         return None
 
     state = state_data.get("state")
     data = state_data.get("data", {})
+
+    if state and state.startswith("notifications:"):
+        from handlers.notifications.manager_menu import handle_notifications_text_input
+
+        return await handle_notifications_text_input(user_id, text, state_data)
+
+    if user_id not in settings.allowed_admin_ids_list:
+        return None
 
     # Estado: aguardando nome do bot
     if state == "awaiting_bot_name":

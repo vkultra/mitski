@@ -89,6 +89,15 @@ class DebugCommandRouter:
                 bot_id=bot_id, chat_id=chat_id, bot_token=bot_token
             )
 
+        # Comando: /debug_mirror
+        if command_lower in ["debug_mirror", "debugmirror"]:
+            return await DebugCommandHandler.handle_mirror_debug(
+                bot_id=bot_id,
+                chat_id=chat_id,
+                user_telegram_id=user_telegram_id,
+                bot_token=bot_token,
+            )
+
         # Comando: /vendaaprovada (com suporte a verbose)
         if command_lower.startswith("vendaaprovada") or command_lower.startswith(
             "venda_aprovada"

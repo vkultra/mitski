@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = ""
     ALLOWED_ADMIN_IDS: str = ""
 
+    # Features opcionais
+    ENABLE_SALE_NOTIFICATIONS: bool = True
+
     # Monitoring
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: str = ""

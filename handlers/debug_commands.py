@@ -685,3 +685,152 @@ async def handle_debug_help(bot_id: int, chat_id: int, bot_token: str) -> Dict:
             bot_token, chat_id, f"❌ Erro ao listar comandos: {str(e)}"
         )
         return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def handle_mirror_debug(
+        bot_id: int,
+        chat_id: int,
+        user_telegram_id: int,
+        bot_token: str,
+    ) -> Dict:
+        """
+        Mostra informações de debug sobre configuração de espelhamento
+
+        Args:
+            bot_id: ID do bot
+            chat_id: ID do chat
+            user_telegram_id: ID do usuário
+            bot_token: Token do bot
+
+        Returns:
+            Dict com resultado do debug
+        """
+        try:
+            import json
+
+            from core.redis_client import redis_client
+            from database.models import MirrorGroup, UserTopic
+            from database.repos import SessionLocal
+
+            debug_info = []
+
+            with SessionLocal() as session:
+                # 1. Verifica MirrorGroup para este bot
+                mirror_group = (
+                    session.query(MirrorGroup).filter_by(bot_id=bot_id).first()
+                )
+
+                if mirror_group:
+                    debug_info.append("✅ **MirrorGroup encontrado no banco:**")
+                    debug_info.append(f"  • Bot ID: {mirror_group.bot_id}")
+                    debug_info.append(f"  • Group ID: `{mirror_group.group_id}`")
+                    debug_info.append(
+                        f"  • Ativo: {'✅ Sim' if mirror_group.is_active else '❌ Não'}"
+                    )
+                    debug_info.append(
+                        f"  • Usar gerenciador: {'✅ Sim' if mirror_group.use_manager_bot else '❌ Não'}"
+                    )
+                    if mirror_group.manager_group_id:
+                        debug_info.append(
+                            f"  • Grupo gerenciador: `{mirror_group.manager_group_id}`"
+                        )
+                    debug_info.append(f"  • Batch size: {mirror_group.batch_size}")
+                    debug_info.append(f"  • Batch delay: {mirror_group.batch_delay}s")
+                    debug_info.append(
+                        f"  • Flush timeout: {mirror_group.flush_timeout}s"
+                    )
+                else:
+                    debug_info.append("❌ **MirrorGroup NÃO encontrado no banco**")
+                    debug_info.append(
+                        "  • Espelhamento não está configurado para este bot"
+                    )
+
+                # 2. Verifica cache Redis
+                cache_key = f"mirror_config:{bot_id}"
+                cache_data = redis_client.get(cache_key)
+
+                debug_info.append("\n🔄 **Cache Redis:**")
+                if cache_data:
+                    config = json.loads(cache_data)
+                    debug_info.append(
+                        f"  • ✅ Cache existe (TTL: {redis_client.ttl(cache_key)}s)"
+                    )
+                    debug_info.append(f"  • Group ID: `{config.get('group_id')}`")
+                    debug_info.append(
+                        f"  • Usar gerenciador: {config.get('use_manager_bot')}"
+                    )
+                else:
+                    debug_info.append("  • ❌ Sem cache (será buscado do banco)")
+
+                # 3. Verifica buffer para este usuário
+                buffer_key = f"buffer:{bot_id}:{user_telegram_id}"
+                buffer_count = redis_client.hget(buffer_key, "count")
+
+                debug_info.append("\n📦 **Buffer de mensagens:**")
+                if buffer_count:
+                    debug_info.append(f"  • ✅ {buffer_count} mensagem(s) no buffer")
+                    first_time = redis_client.hget(buffer_key, "first_message_time")
+                    if first_time:
+                        import time
+
+                        age = int(time.time() - float(first_time))
+                        debug_info.append(f"  • Idade do buffer: {age}s")
+                else:
+                    debug_info.append("  • ✅ Buffer vazio (normal)")
+
+                # 4. Verifica tópico para este usuário
+                user_topic = (
+                    session.query(UserTopic)
+                    .filter_by(bot_id=bot_id, user_telegram_id=user_telegram_id)
+                    .first()
+                )
+
+                debug_info.append("\n💬 **Tópico do usuário:**")
+                if user_topic:
+                    debug_info.append(
+                        f"  • ✅ Tópico criado (ID: {user_topic.topic_id})"
+                    )
+                    debug_info.append(
+                        f"  • Mensagens espelhadas: {user_topic.messages_mirrored}"
+                    )
+                    if user_topic.last_batch_sent:
+                        debug_info.append(
+                            f"  • Último batch: {user_topic.last_batch_sent.strftime('%d/%m/%Y %H:%M')}"
+                        )
+                    debug_info.append(
+                        f"  • Banido: {'❌ Sim' if user_topic.is_banned else '✅ Não'}"
+                    )
+                    debug_info.append(
+                        f"  • IA pausada: {'⏸️ Sim' if user_topic.is_ai_paused else '▶️ Não'}"
+                    )
+                else:
+                    debug_info.append("  • ⚠️ Tópico ainda não criado")
+                    debug_info.append(
+                        "  • Será criado automaticamente na próxima mensagem"
+                    )
+
+            text = "🔍 **DEBUG - ESPELHAMENTO**\n" + "─" * 30 + "\n\n"
+            text += "\n".join(debug_info)
+            text += "\n\n💡 Use este debug para verificar se tudo está configurado corretamente."
+
+            api = TelegramAPI()
+            await api.send_message(bot_token, chat_id, text, parse_mode="Markdown")
+
+            return {
+                "success": True,
+                "has_mirror_group": (
+                    mirror_group is not None if "mirror_group" in locals() else False
+                ),
+                "has_cache": (
+                    cache_data is not None if "cache_data" in locals() else False
+                ),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Erro no comando debug de espelhamento",
+                extra={"error": str(e), "bot_id": bot_id},
+            )
+            api = TelegramAPI()
+            await api.send_message(bot_token, chat_id, f"❌ Erro no debug: {str(e)}")
+            return {"success": False, "error": str(e)}

@@ -228,6 +228,122 @@ class OfferDeliverable(Base):
     __table_args__ = (Index("idx_offer_deliverable", "offer_id"),)
 
 
+class RecoveryCampaign(Base):
+    """Campanha de mensagens de recuperação por bot"""
+
+    __tablename__ = "recovery_campaigns"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(
+        Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title = Column(String(128))
+    timezone = Column(String(64), default="UTC")
+    inactivity_threshold_seconds = Column(Integer, default=600)
+    is_active = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
+    skip_paid_users = Column(Boolean, default=True)
+    created_by = Column(BigInteger)
+    updated_by = Column(BigInteger)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_recovery_campaign_bot", "bot_id", "is_active"),)
+
+
+class RecoveryStep(Base):
+    """Passo sequencial de uma campanha de recuperação"""
+
+    __tablename__ = "recovery_steps"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(
+        Integer, ForeignKey("recovery_campaigns.id", ondelete="CASCADE"), nullable=False
+    )
+    order_index = Column(Integer, nullable=False)
+    schedule_type = Column(String(32), nullable=False)  # relative, next_day, plus_days
+    schedule_value = Column(String(64), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_recovery_step_order",
+            "campaign_id",
+            "order_index",
+            unique=True,
+        ),
+    )
+
+
+class RecoveryBlock(Base):
+    """Bloco de mensagem configurável para recuperação"""
+
+    __tablename__ = "recovery_blocks"
+
+    id = Column(Integer, primary_key=True)
+    step_id = Column(
+        Integer, ForeignKey("recovery_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    order_index = Column(Integer, nullable=False)
+    text = Column(String(4096))
+    parse_mode = Column(String(32), default="Markdown")
+    media_file_id = Column(String(256))
+    media_type = Column(String(32))
+    delay_seconds = Column(Integer, default=0)
+    auto_delete_seconds = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_recovery_block_order",
+            "step_id",
+            "order_index",
+            unique=True,
+        ),
+    )
+
+
+class RecoveryDelivery(Base):
+    """Registro de envio/agendamento das mensagens de recuperação"""
+
+    __tablename__ = "recovery_deliveries"
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(
+        Integer, ForeignKey("recovery_campaigns.id", ondelete="CASCADE"), nullable=False
+    )
+    step_id = Column(
+        Integer, ForeignKey("recovery_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    episode_id = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, index=True)
+    scheduled_for = Column(DateTime, index=True)
+    sent_at = Column(DateTime)
+    message_ids_json = Column(Text)
+    version_snapshot = Column(Integer)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_recovery_delivery_unique",
+            "bot_id",
+            "user_id",
+            "step_id",
+            "episode_id",
+            unique=True,
+        ),
+        Index("idx_recovery_delivery_status", "bot_id", "user_id", "status"),
+    )
+
+
 class GatewayConfig(Base):
     """Configuração de gateway de pagamento por usuário"""
 
@@ -613,3 +729,113 @@ class BotAntiSpamConfig(Base):
     updated_at = Column(DateTime, onupdate=func.now())
 
     __table_args__ = (Index("idx_bot_antispam", "bot_id", unique=True),)
+
+
+class MirrorGroup(Base):
+    """Configuração do grupo de espelhamento por bot"""
+
+    __tablename__ = "mirror_groups"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(
+        Integer, ForeignKey("bots.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    group_id = Column(BigInteger, nullable=False)  # ID do grupo/supergrupo
+    is_active = Column(Boolean, default=True)
+
+    # Modo centralizado (usar bot gerenciador)
+    use_manager_bot = Column(Boolean, default=False)  # Usar bot gerenciador
+    manager_group_id = Column(
+        BigInteger
+    )  # ID do grupo centralizado (se use_manager_bot=True)
+
+    # Configurações de batching
+    batch_size = Column(Integer, default=5)  # Mensagens por batch (1-10)
+    batch_delay = Column(Integer, default=2)  # Segundos entre batches
+    flush_timeout = Column(Integer, default=3)  # Timeout para flush automático
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_mirror_bot", "bot_id", unique=True),)
+
+
+class UserTopic(Base):
+    """Mapeamento de usuário para tópico no grupo de espelhamento"""
+
+    __tablename__ = "user_topics"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_telegram_id = Column(BigInteger, nullable=False)
+    topic_id = Column(Integer, nullable=False)  # message_thread_id do tópico
+    pinned_message_id = Column(BigInteger)  # ID da mensagem fixada com controles
+
+    # Estados de controle
+    is_banned = Column(Boolean, default=False)
+    is_ai_paused = Column(Boolean, default=False)
+
+    # Métricas
+    last_batch_sent = Column(DateTime)
+    messages_mirrored = Column(Integer, default=0)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_user_topic", "bot_id", "user_telegram_id", unique=True),
+        Index("idx_topic_lookup", "bot_id", "topic_id"),
+    )
+
+
+class MirrorBuffer(Base):
+    """Buffer persistente de mensagens para espelhamento"""
+
+    __tablename__ = "mirror_buffers"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_telegram_id = Column(BigInteger, nullable=False)
+    topic_id = Column(Integer)
+
+    # Mensagens em JSON
+    messages = Column(Text, nullable=False)  # JSON array de mensagens
+    message_count = Column(Integer, default=0)
+
+    # Status
+    status = Column(String(16), default="pending")  # pending, sending, sent, failed
+    retry_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    scheduled_flush = Column(DateTime)
+    sent_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_buffer_status", "status", "created_at"),
+        Index("idx_buffer_user", "bot_id", "user_telegram_id"),
+    )
+
+
+class MirrorGlobalConfig(Base):
+    """Configuração global de espelhamento por administrador"""
+
+    __tablename__ = "mirror_global_configs"
+
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(
+        BigInteger, unique=True, nullable=False
+    )  # ID do admin no Telegram
+    use_centralized_mode = Column(Boolean, default=False)  # Ativar modo centralizado
+    manager_group_id = Column(BigInteger)  # ID do grupo único para todos os bots
+    is_active = Column(Boolean, default=True)
+
+    # Configurações de batch globais
+    batch_size = Column(Integer, default=5)
+    batch_delay = Column(Integer, default=2)
+    flush_timeout = Column(Integer, default=3)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_global_admin", "admin_id", unique=True),)

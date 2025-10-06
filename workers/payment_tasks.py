@@ -14,6 +14,7 @@ from database.repos import (
 )
 from services.gateway.gateway_service import GatewayService
 from services.gateway.pushinpay_client import PushinPayClient
+from services.sales import emit_sale_approved
 from workers.celery_app import celery_app
 
 
@@ -58,6 +59,7 @@ def verify_payment_task(transaction_id: int):
 
     # Se já pago ou entregue, não precisa verificar mais
     if transaction.status == "paid" and transaction.delivered_at:
+        emit_sale_approved(transaction.transaction_id, origin="auto")
         logger.info(
             "Transaction already paid and delivered",
             extra={"transaction_id": transaction_id},
@@ -68,6 +70,7 @@ def verify_payment_task(transaction_id: int):
     if transaction.status in ["paid", "expired"]:
         # Se pago mas não entregue, tenta entregar
         if transaction.status == "paid" and not transaction.delivered_at:
+            emit_sale_approved(transaction.transaction_id, origin="auto")
             deliver_content_sync(transaction_id)
         return
 
@@ -129,6 +132,9 @@ def verify_payment_task(transaction_id: int):
             )
 
         # Se pago, entrega conteúdo
+        if current_status == "paid":
+            emit_sale_approved(transaction.transaction_id, origin="auto")
+
         if current_status == "paid" and not transaction.delivered_at:
             deliver_content_sync(transaction_id)
 

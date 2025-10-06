@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from core.telemetry import logger
 
-from .models import Bot, User
+from .models import Bot, BotAIConfig, User
 
 if TYPE_CHECKING:
     from .models import (
@@ -76,22 +76,34 @@ class BotRepository:
 
     @staticmethod
     async def deactivate_bot(bot_id: int) -> bool:
-        """Desativa bot"""
+        """Desativa bot e sua IA se configurada"""
         with SessionLocal() as session:
             bot = session.query(Bot).filter(Bot.id == bot_id).first()
             if bot:
                 bot.is_active = False
+
+                # Desativar IA se existir configuração
+                ai_config = session.query(BotAIConfig).filter_by(bot_id=bot_id).first()
+                if ai_config:
+                    ai_config.is_enabled = False
+
                 session.commit()
                 return True
             return False
 
     @staticmethod
     async def activate_bot(bot_id: int) -> bool:
-        """Reativa bot"""
+        """Reativa bot e sua IA se configurada"""
         with SessionLocal() as session:
             bot = session.query(Bot).filter(Bot.id == bot_id).first()
             if bot:
                 bot.is_active = True
+
+                # Ativar IA se existir configuração
+                ai_config = session.query(BotAIConfig).filter_by(bot_id=bot_id).first()
+                if ai_config:
+                    ai_config.is_enabled = True
+
                 session.commit()
                 return True
             return False
@@ -168,6 +180,27 @@ class UserRepository:
 
                 user.last_interaction = datetime.utcnow()
                 session.commit()
+
+    @staticmethod
+    def get_user_id_sync(bot_id: int, telegram_id: int) -> Optional[int]:
+        """Retorna ID interno do usuário ou None."""
+        with SessionLocal() as session:
+            user = (
+                session.query(User.id)
+                .filter(User.bot_id == bot_id, User.telegram_id == telegram_id)
+                .first()
+            )
+            return user[0] if user else None
+
+    @staticmethod
+    def get_user_sync(bot_id: int, telegram_id: int) -> Optional[User]:
+        """Retorna metadados básicos do usuário (sync para workers)."""
+        with SessionLocal() as session:
+            return (
+                session.query(User)
+                .filter(User.bot_id == bot_id, User.telegram_id == telegram_id)
+                .first()
+            )
 
     @staticmethod
     def block_user_sync(bot_id: int, telegram_id: int, reason: str) -> bool:
@@ -1383,6 +1416,18 @@ class PixTransactionRepository:
             )
 
     @staticmethod
+    def get_by_transaction_id_sync(transaction_id: str):
+        """Busca transação por transaction_id (sync para workers)."""
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction)
+                .filter(PixTransaction.transaction_id == transaction_id)
+                .first()
+            )
+
+    @staticmethod
     async def get_latest_unpaid_by_chat(chat_id: int):
         """Busca última transação não paga de um chat"""
         from .models import PixTransaction
@@ -1497,6 +1542,38 @@ class PixTransactionRepository:
                 session.commit()
                 return True
             return False
+
+    @staticmethod
+    async def user_has_paid(bot_id: int, user_telegram_id: int) -> bool:
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction.id)
+                .filter(
+                    PixTransaction.bot_id == bot_id,
+                    PixTransaction.user_telegram_id == user_telegram_id,
+                    PixTransaction.status == "paid",
+                )
+                .first()
+                is not None
+            )
+
+    @staticmethod
+    def user_has_paid_sync(bot_id: int, user_telegram_id: int) -> bool:
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            return (
+                session.query(PixTransaction.id)
+                .filter(
+                    PixTransaction.bot_id == bot_id,
+                    PixTransaction.user_telegram_id == user_telegram_id,
+                    PixTransaction.status == "paid",
+                )
+                .first()
+                is not None
+            )
 
     @staticmethod
     def get_pending_by_user_and_offer_sync(

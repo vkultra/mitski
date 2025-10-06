@@ -12,6 +12,7 @@ from database.repos import (
     OfferDeliverableBlockRepository,
     PixTransactionRepository,
 )
+from services.sales import emit_sale_approved
 
 from .gateway_service import GatewayService
 from .pushinpay_client import PushinPayClient
@@ -38,10 +39,13 @@ class PaymentVerifier:
 
         # Se já pago e entregue, retorna
         if transaction.status == "paid" and transaction.delivered_at:
+            emit_sale_approved(transaction.transaction_id, origin="auto")
             return {"status": "paid", "delivered": True, "transaction": transaction}
 
         # Se status é final (paid ou expired), não verifica API
         if transaction.status in ["paid", "expired"]:
+            if transaction.status == "paid":
+                emit_sale_approved(transaction.transaction_id, origin="auto")
             return {
                 "status": transaction.status,
                 "delivered": transaction.delivered_at is not None,
@@ -71,8 +75,10 @@ class PaymentVerifier:
                 transaction.status = api_status["status"]
 
             # Se pago, entrega conteúdo
-            if api_status["status"] == "paid" and not transaction.delivered_at:
-                await PaymentVerifier.deliver_content(transaction_id)
+            if api_status["status"] == "paid":
+                emit_sale_approved(transaction.transaction_id, origin="auto")
+                if not transaction.delivered_at:
+                    await PaymentVerifier.deliver_content(transaction_id)
                 return {"status": "paid", "delivered": True, "transaction": transaction}
 
             return {

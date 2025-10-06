@@ -15,6 +15,7 @@ from services.ai.grok_client import GrokAPIClient
 from services.ai.image_handler import ImageHandler
 from services.ai.phase_detector import PhaseDetectorService
 from services.gateway.payment_verifier import PaymentVerifier
+from services.sales import emit_sale_approved
 
 
 class AIConversationService:
@@ -449,6 +450,10 @@ class AIConversationService:
                     )
 
                     if payment_status.get("status") == "paid":
+                        emit_sale_approved(
+                            transaction.transaction_id,
+                            origin="manual",
+                        )
                         # Pagamento encontrado - entregar conteúdo
                         await PaymentVerifier.deliver_content(transaction.id)
 

@@ -2,6 +2,8 @@
 Testes para repositories (Bot, User, etc)
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from database.models import Bot, User
@@ -20,7 +22,6 @@ class TestBotRepository:
             display_name="New Bot",
             token=b"encrypted_token_data",
             is_active=True,
-            max_users=100,
         )
         db_session.add(bot)
         db_session.commit()
@@ -60,13 +61,12 @@ class TestBotRepository:
                 username=f"bot{i}",
                 display_name=f"Bot {i}",
                 token=b"token",
-                max_users=100,
             )
             db_session.add(bot)
         db_session.commit()
 
         # Lista
-        bots = await BotRepository.list_bots_by_admin(admin_id)
+        bots = await BotRepository.get_bots_by_admin(admin_id)
 
         assert len(bots) == 3
         assert all(b.admin_id == admin_id for b in bots)
@@ -104,22 +104,22 @@ class TestBotRepository:
 
         # Verifica
         db_session.refresh(sample_bot)
-        assert sample_bot.offer_id == sample_offer.id
+        assert sample_bot.associated_offer_id == sample_offer.id
 
     @pytest.mark.asyncio
     async def test_disassociate_offer(self, db_session, sample_bot, sample_offer):
         """Testa desassociar oferta de bot"""
         # Primeiro associa
-        sample_bot.offer_id = sample_offer.id
+        sample_bot.associated_offer_id = sample_offer.id
         db_session.commit()
 
         # Depois desassocia
-        success = await BotRepository.disassociate_offer(sample_bot.id)
+        success = await BotRepository.dissociate_offer(sample_bot.id)
         assert success is True
 
         # Verifica
         db_session.refresh(sample_bot)
-        assert sample_bot.offer_id is None
+        assert sample_bot.associated_offer_id is None
 
 
 class TestUserRepository:
@@ -128,20 +128,12 @@ class TestUserRepository:
     @pytest.mark.asyncio
     async def test_create_or_update_user_new(self, db_session, sample_bot):
         """Testa criar novo usuário"""
-        user_data = {
-            "id": 777888999,
-            "first_name": "John",
-            "last_name": "Doe",
-            "username": "johndoe",
-        }
-
-        await UserRepository.create_or_update_user(sample_bot.id, user_data)
-
-        # Verifica
-        user = (
-            db_session.query(User)
-            .filter_by(bot_id=sample_bot.id, telegram_id=777888999)
-            .first()
+        user = await UserRepository.get_or_create_user(
+            telegram_id=777888999,
+            bot_id=sample_bot.id,
+            first_name="John",
+            last_name="Doe",
+            username="johndoe",
         )
 
         assert user is not None
@@ -152,28 +144,30 @@ class TestUserRepository:
     async def test_create_or_update_user_existing(
         self, db_session, sample_bot, sample_user
     ):
-        """Testa atualizar usuário existente"""
-        user_data = {
-            "id": sample_user.telegram_id,
-            "first_name": "Updated",
-            "last_name": "Name",
-            "username": "newusername",
-        }
-
-        await UserRepository.create_or_update_user(sample_bot.id, user_data)
-
-        # Verifica
-        db_session.refresh(sample_user)
-        assert sample_user.first_name == "Updated"
-        assert sample_user.username == "newusername"
-
-    @pytest.mark.asyncio
-    async def test_get_user(self, db_session, sample_bot, sample_user):
-        """Testa buscar usuário"""
-        user = await UserRepository.get_user(sample_bot.id, sample_user.telegram_id)
+        """Testa buscar usuário existente"""
+        user = await UserRepository.get_or_create_user(
+            telegram_id=sample_user.telegram_id,
+            bot_id=sample_bot.id,
+            first_name="Updated",
+            last_name="Name",
+            username="newusername",
+        )
 
         assert user is not None
         assert user.telegram_id == sample_user.telegram_id
+        # get_or_create apenas busca se já existe, não atualiza
+        assert user.id == sample_user.id
+
+    @pytest.mark.asyncio
+    async def test_get_user(self, db_session, sample_bot, sample_user):
+        """Testa buscar usuário existente via get_or_create"""
+        user = await UserRepository.get_or_create_user(
+            telegram_id=sample_user.telegram_id, bot_id=sample_bot.id
+        )
+
+        assert user is not None
+        assert user.telegram_id == sample_user.telegram_id
+        assert user.id == sample_user.id
 
     @pytest.mark.asyncio
     async def test_block_user(self, db_session, sample_bot, sample_user):
@@ -302,9 +296,13 @@ class TestRepositoryEdgeCases:
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_user(self, db_session, sample_bot):
-        """Testa buscar usuário que não existe"""
-        user = await UserRepository.get_user(sample_bot.id, 999999)
-        assert user is None
+        """Testa que get_or_create cria usuário se não existe"""
+        user = await UserRepository.get_or_create_user(
+            telegram_id=999999, bot_id=sample_bot.id
+        )
+        # get_or_create cria o usuário se não existir
+        assert user is not None
+        assert user.telegram_id == 999999
 
     @pytest.mark.asyncio
     async def test_block_already_blocked_user(
@@ -352,24 +350,16 @@ class TestRepositoryEdgeCases:
     @pytest.mark.asyncio
     async def test_list_bots_empty(self, db_session):
         """Testa listar bots quando não há nenhum"""
-        bots = await BotRepository.list_bots_by_admin(admin_id=111222333)
+        bots = await BotRepository.get_bots_by_admin(admin_id=111222333)
         assert len(bots) == 0
 
     @pytest.mark.asyncio
     async def test_create_user_with_minimal_data(self, db_session, sample_bot):
         """Testa criar usuário com dados mínimos"""
-        user_data = {
-            "id": 123456,
+        user = await UserRepository.get_or_create_user(
+            telegram_id=123456,
+            bot_id=sample_bot.id,
             # Sem first_name, last_name, username
-        }
-
-        await UserRepository.create_or_update_user(sample_bot.id, user_data)
-
-        # Verifica
-        user = (
-            db_session.query(User)
-            .filter_by(bot_id=sample_bot.id, telegram_id=123456)
-            .first()
         )
 
         assert user is not None
@@ -379,14 +369,13 @@ class TestRepositoryEdgeCases:
     @pytest.mark.asyncio
     async def test_create_user_with_long_names(self, db_session, sample_bot):
         """Testa criar usuário com nomes muito longos"""
-        user_data = {
-            "id": 789012,
-            "first_name": "A" * 500,  # Muito longo
-            "last_name": "B" * 500,
-            "username": "C" * 100,
-        }
-
-        await UserRepository.create_or_update_user(sample_bot.id, user_data)
+        user = await UserRepository.get_or_create_user(
+            telegram_id=789012,
+            bot_id=sample_bot.id,
+            first_name="A" * 500,  # Muito longo
+            last_name="B" * 500,
+            username="C" * 100,
+        )
 
         # Verifica que foi truncado ou aceito conforme modelo
         user = (
@@ -410,15 +399,19 @@ class TestRepositoryConcurrency:
         # Simula múltiplas atualizações simultâneas
         async def update_user():
             await UserRepository.update_last_interaction(
-                sample_bot.id, sample_user.telegram_id
+                sample_user.telegram_id, sample_bot.id
             )
 
         # Executa 10 updates concorrentes
         await asyncio.gather(*[update_user() for _ in range(10)])
 
-        # Verifica que última interação foi atualizada
-        db_session.refresh(sample_user)
-        assert sample_user.last_interaction is not None
+        # Re-query o usuário do banco para ver as mudanças commitadas
+        updated_user = (
+            db_session.query(User)
+            .filter_by(telegram_id=sample_user.telegram_id, bot_id=sample_bot.id)
+            .first()
+        )
+        assert updated_user.last_interaction is not None
 
     @pytest.mark.asyncio
     async def test_concurrent_config_toggles(

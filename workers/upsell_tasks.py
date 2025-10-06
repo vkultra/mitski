@@ -13,6 +13,7 @@ from database.repos import (
     UpsellRepository,
     UserUpsellHistoryRepository,
 )
+from services.sales import emit_sale_approved
 from services.upsell import (
     AnnouncementSender,
     DeliverableSender,
@@ -220,6 +221,8 @@ def process_upsell_payment(transaction_id: int):
 
     upsell_id = transaction.upsell_id
 
+    emit_sale_approved(transaction.transaction_id, origin="upsell-manual")
+
     # Entregar deliverable
     bot = BotRepository.get_bot_by_id_sync(transaction.bot_id)
     if not bot:
@@ -290,6 +293,7 @@ def verify_upsell_payment(transaction_id: int, attempt: int = 1):
     payment_status = asyncio.run(PaymentVerifier.verify_payment(transaction_id))
 
     if payment_status.get("status") == "paid":
+        emit_sale_approved(transaction.transaction_id, origin="upsell-auto")
         # Pagamento confirmado - processar entrega
         logger.info(
             "Upsell payment confirmed",

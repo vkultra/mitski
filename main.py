@@ -2,7 +2,9 @@
 FastAPI Webhook Receiver para Multi-Bot Manager
 """
 
+import atexit
 import os
+import signal
 import time
 from collections import deque
 from typing import Deque
@@ -142,6 +144,57 @@ async def webhook(bot_id: int, request: Request):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+def graceful_shutdown(signum=None, frame=None):
+    """Executa shutdown gracioso, fazendo flush de todos os buffers"""
+    logger.info("Starting graceful shutdown...")
+
+    try:
+        # Importa aqui para evitar circular import
+        from workers.mirror_tasks import flush_all_buffers
+
+        # Enfileira flush de todos os buffers com alta prioridade
+        result = flush_all_buffers.apply_async(priority=10, queue="mirror_high")
+
+        # Aguarda até 30 segundos pela conclusão
+        try:
+            count = result.get(timeout=30)
+            logger.info(f"Graceful shutdown: flushed {count} buffers")
+        except Exception as e:
+            logger.warning(f"Timeout waiting for buffer flush: {e}")
+
+    except Exception as e:
+        logger.error(f"Error during graceful shutdown: {e}")
+
+    logger.info("Graceful shutdown complete")
+
+
+# Registra handlers para sinais de término
+signal.signal(signal.SIGTERM, graceful_shutdown)
+signal.signal(signal.SIGINT, graceful_shutdown)
+atexit.register(graceful_shutdown)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Executado quando a aplicação inicia"""
+    logger.info("Application starting...")
+
+    # Se configurado, recupera buffers órfãos
+    if os.getenv("MIRROR_RECOVERY_ON_STARTUP", "true").lower() == "true":
+        from workers.mirror_tasks import recover_orphan_buffers
+
+        # Agenda recuperação após 5 segundos do startup
+        recover_orphan_buffers.apply_async(countdown=5, queue="mirror")
+        logger.info("Scheduled orphan buffer recovery")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Executado quando a aplicação está sendo encerrada"""
+    logger.info("Application shutting down...")
+    graceful_shutdown()
 
 
 if __name__ == "__main__":
