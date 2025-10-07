@@ -31,6 +31,7 @@ class MediaStreamService:
         bot_id: int,
         media_type: str,
         manager_bot_token: str = None,
+        skip_cache: bool = False,
     ) -> Tuple[Optional[str], Optional[BytesIO]]:
         """
         Obtém file_id do cache ou faz stream da mídia
@@ -47,20 +48,21 @@ class MediaStreamService:
             - Se precisa fazer stream: (None, BytesIO)
         """
         # 1. Verificar cache
-        cached_file_id = await MediaFileCacheRepository.get_cached_file_id(
-            original_file_id, bot_id
-        )
-
-        if cached_file_id:
-            logger.info(
-                "Media found in cache",
-                extra={
-                    "original_file_id": original_file_id,
-                    "bot_id": bot_id,
-                    "cached_file_id": cached_file_id,
-                },
+        if not skip_cache:
+            cached_file_id = await MediaFileCacheRepository.get_cached_file_id(
+                original_file_id, bot_id
             )
-            return (cached_file_id, None)
+
+            if cached_file_id:
+                logger.info(
+                    "Media found in cache",
+                    extra={
+                        "original_file_id": original_file_id,
+                        "bot_id": bot_id,
+                        "cached_file_id": cached_file_id,
+                    },
+                )
+                return (cached_file_id, None)
 
         # 2. Não está no cache - fazer stream
         logger.info(

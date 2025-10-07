@@ -19,6 +19,8 @@ if TYPE_CHECKING:
         Offer,
         OfferDeliverable,
         OfferPitchBlock,
+        StartTemplate,
+        StartTemplateBlock,
         UserActionStatus,
     )
 
@@ -1890,6 +1892,22 @@ class MediaFileCacheRepository:
 
             session.commit()
 
+    @staticmethod
+    async def clear_cached_file_id(original_file_id: str, bot_id: int) -> None:
+        """Remove cache de file_id inválido."""
+        from .models import MediaFileCache
+
+        with SessionLocal() as session:
+            (
+                session.query(MediaFileCache)
+                .filter(
+                    MediaFileCache.original_file_id == original_file_id,
+                    MediaFileCache.bot_id == bot_id,
+                )
+                .delete(synchronize_session=False)
+            )
+            session.commit()
+
 
 class AIActionRepository:
     """Repository para ações da IA"""
@@ -2137,6 +2155,307 @@ class AIActionBlockRepository:
                 .order_by(AIActionBlock.order)
                 .all()
             )
+
+
+class StartTemplateRepository:
+    """Repository para template de mensagem inicial"""
+
+    @staticmethod
+    async def get_or_create(bot_id: int) -> "StartTemplate":
+        from .models import StartTemplate
+
+        with SessionLocal() as session:
+            template = (
+                session.query(StartTemplate)
+                .filter(StartTemplate.bot_id == bot_id)
+                .first()
+            )
+
+            if not template:
+                template = StartTemplate(bot_id=bot_id, is_active=True, version=1)
+                session.add(template)
+                session.commit()
+                session.refresh(template)
+
+            return template
+
+    @staticmethod
+    async def get_by_id(template_id: int) -> Optional["StartTemplate"]:
+        from .models import StartTemplate
+
+        with SessionLocal() as session:
+            return (
+                session.query(StartTemplate)
+                .filter(StartTemplate.id == template_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_template(template_id: int, **kwargs) -> Optional["StartTemplate"]:
+        from datetime import datetime
+
+        from .models import StartTemplate
+
+        with SessionLocal() as session:
+            template = (
+                session.query(StartTemplate)
+                .filter(StartTemplate.id == template_id)
+                .first()
+            )
+            if not template:
+                return None
+
+            for key, value in kwargs.items():
+                if hasattr(template, key):
+                    setattr(template, key, value)
+
+            template.updated_at = datetime.utcnow()
+            session.commit()
+            session.refresh(template)
+            return template
+
+    @staticmethod
+    async def increment_version(template_id: int) -> Optional[int]:
+        from datetime import datetime
+
+        from sqlalchemy import select, update
+
+        from .models import StartTemplate
+
+        with SessionLocal() as session:
+            with session.begin():
+                stmt = (
+                    select(StartTemplate)
+                    .where(StartTemplate.id == template_id)
+                    .with_for_update()
+                )
+                template = session.execute(stmt).scalars().first()
+                if not template:
+                    return None
+
+                new_version = template.version + 1
+                session.execute(
+                    update(StartTemplate)
+                    .where(StartTemplate.id == template_id)
+                    .values(version=new_version, updated_at=datetime.utcnow())
+                )
+
+            session.commit()
+            return new_version
+
+    @staticmethod
+    def get_active_template_sync(bot_id: int) -> Optional["StartTemplate"]:
+        from .models import StartTemplate
+
+        with SessionLocal() as session:
+            return (
+                session.query(StartTemplate)
+                .filter(
+                    StartTemplate.bot_id == bot_id,
+                    StartTemplate.is_active.is_(True),
+                )
+                .first()
+            )
+
+
+class StartTemplateBlockRepository:
+    """Repository para blocos do template de /start"""
+
+    @staticmethod
+    async def list_blocks(template_id: int) -> List["StartTemplateBlock"]:
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(StartTemplateBlock)
+                .filter(StartTemplateBlock.template_id == template_id)
+                .order_by(StartTemplateBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def count_blocks(template_id: int) -> int:
+        from sqlalchemy import func
+
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(func.count(StartTemplateBlock.id))
+                .filter(StartTemplateBlock.template_id == template_id)
+                .scalar()
+            )
+
+    @staticmethod
+    async def get_block(block_id: int) -> Optional["StartTemplateBlock"]:
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(StartTemplateBlock)
+                .filter(StartTemplateBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def create_block(
+        template_id: int,
+        order: int,
+        text: str = None,
+        media_file_id: str = None,
+        media_type: str = None,
+        delay_seconds: int = 0,
+        auto_delete_seconds: int = 0,
+    ) -> "StartTemplateBlock":
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            block = StartTemplateBlock(
+                template_id=template_id,
+                order=order,
+                text=text,
+                media_file_id=media_file_id,
+                media_type=media_type,
+                delay_seconds=delay_seconds,
+                auto_delete_seconds=auto_delete_seconds,
+            )
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        from datetime import datetime
+
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(StartTemplateBlock)
+                .filter(StartTemplateBlock.id == block_id)
+                .first()
+            )
+            if not block:
+                return False
+
+            for key, value in kwargs.items():
+                if hasattr(block, key):
+                    setattr(block, key, value)
+
+            block.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+
+    @staticmethod
+    async def delete_block(block_id: int) -> Optional[int]:
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(StartTemplateBlock)
+                .filter(StartTemplateBlock.id == block_id)
+                .first()
+            )
+            if not block:
+                return None
+
+            template_id = block.template_id
+            deleted_order = block.order
+            session.delete(block)
+
+            remaining_blocks = (
+                session.query(StartTemplateBlock)
+                .filter(
+                    StartTemplateBlock.template_id == template_id,
+                    StartTemplateBlock.order > deleted_order,
+                )
+                .order_by(StartTemplateBlock.order)
+                .all()
+            )
+
+            for remaining_block in remaining_blocks:
+                remaining_block.order -= 1
+
+            session.commit()
+            return template_id
+
+    @staticmethod
+    def list_blocks_sync(template_id: int) -> List["StartTemplateBlock"]:
+        from .models import StartTemplateBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(StartTemplateBlock)
+                .filter(StartTemplateBlock.template_id == template_id)
+                .order_by(StartTemplateBlock.order)
+                .all()
+            )
+
+
+class StartMessageStatusRepository:
+    """Repository para controle de envio de /start"""
+
+    @staticmethod
+    async def mark_sent(
+        bot_id: int, user_telegram_id: int, template_version: int
+    ) -> None:
+        from datetime import datetime
+
+        from .models import StartMessageStatus
+
+        with SessionLocal() as session:
+            status = (
+                session.query(StartMessageStatus)
+                .filter(
+                    StartMessageStatus.bot_id == bot_id,
+                    StartMessageStatus.user_telegram_id == user_telegram_id,
+                )
+                .first()
+            )
+
+            if status:
+                status.template_version = template_version
+                status.sent_at = datetime.utcnow()
+            else:
+                status = StartMessageStatus(
+                    bot_id=bot_id,
+                    user_telegram_id=user_telegram_id,
+                    template_version=template_version,
+                )
+                session.add(status)
+
+            session.commit()
+
+    @staticmethod
+    def has_received_sync(bot_id: int, user_telegram_id: int) -> bool:
+        from sqlalchemy import exists, select
+
+        from .models import StartMessageStatus
+
+        with SessionLocal() as session:
+            stmt = select(
+                exists().where(
+                    (StartMessageStatus.bot_id == bot_id)
+                    & (StartMessageStatus.user_telegram_id == user_telegram_id)
+                )
+            )
+            return session.execute(stmt).scalar()
+
+    @staticmethod
+    def get_version_sync(bot_id: int, user_telegram_id: int) -> Optional[int]:
+        from .models import StartMessageStatus
+
+        with SessionLocal() as session:
+            status = (
+                session.query(StartMessageStatus)
+                .filter(
+                    StartMessageStatus.bot_id == bot_id,
+                    StartMessageStatus.user_telegram_id == user_telegram_id,
+                )
+                .first()
+            )
+            return status.template_version if status else None
 
 
 class UserActionStatusRepository:

@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:  # pragma: no cover - usado somente para tipagem
     from prometheus_client import Counter
-except ImportError:  # pragma: no cover - fallback para ambientes sem prometheus
-    class Counter:  # type: ignore[override]
-        def __init__(self, *_args, **_kwargs):
-            pass
+else:  # pragma: no cover
+    try:
+        from prometheus_client import Counter
+    except ImportError:
 
-        def labels(self, *_args, **_kwargs):  # noqa: D401 - API compatível
-            return self
+        class Counter:  # type: ignore[override]
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                return None
 
-        def inc(self, *_args, **_kwargs):
-            return None
+            def labels(self, *_args: Any, **_kwargs: Any) -> "Counter":
+                return self
+
+            def inc(self, *_args: Any, **_kwargs: Any) -> None:
+                return None
 
 
 NOTIFICATIONS_ENQUEUED = Counter(

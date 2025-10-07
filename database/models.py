@@ -534,6 +534,67 @@ class AIActionBlock(Base):
     __table_args__ = (Index("idx_action_blocks_order", "action_id", "order"),)
 
 
+class StartTemplate(Base):
+    """Template da mensagem inicial /start por bot"""
+
+    __tablename__ = "start_templates"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_start_template_bot", "bot_id", unique=True),
+        Index("idx_start_template_active", "bot_id", "is_active"),
+    )
+
+
+class StartTemplateBlock(Base):
+    """Blocos que compõem o template de /start"""
+
+    __tablename__ = "start_template_blocks"
+
+    id = Column(Integer, primary_key=True)
+    template_id = Column(
+        Integer, ForeignKey("start_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    order = Column(Integer, nullable=False)
+    text = Column(String(4096))
+    media_file_id = Column(String(256))
+    media_type = Column(String(32))
+    delay_seconds = Column(Integer, default=0)
+    auto_delete_seconds = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_start_blocks_order", "template_id", "order"),)
+
+
+class StartMessageStatus(Base):
+    """Estado de envio da mensagem inicial por usuário"""
+
+    __tablename__ = "start_message_status"
+
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(Integer, ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    user_telegram_id = Column(BigInteger, nullable=False)
+    template_version = Column(Integer, nullable=False, default=1)
+    sent_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_start_message_status_unique",
+            "bot_id",
+            "user_telegram_id",
+            unique=True,
+        ),
+        Index("idx_start_message_status_bot", "bot_id"),
+    )
+
+
 class UserActionStatus(Base):
     """Rastreamento de status de ações por usuário"""
 
@@ -839,3 +900,10 @@ class MirrorGlobalConfig(Base):
     updated_at = Column(DateTime, onupdate=func.now())
 
     __table_args__ = (Index("idx_global_admin", "admin_id", unique=True),)
+
+
+def _register_extra_models() -> None:
+    from . import stats_models  # noqa: F401
+
+
+_register_extra_models()
