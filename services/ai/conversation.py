@@ -2,6 +2,7 @@
 Serviço de gerenciamento de conversação com IA
 """
 
+import re
 from typing import Any, Dict, List
 
 from core.telemetry import logger
@@ -22,6 +23,7 @@ class AIConversationService:
     """Gerencia conversação com IA Grok"""
 
     HISTORY_LIMIT = 7  # Manter últimas 7 mensagens (14 entries: user+assistant)
+    MAX_PHASE_TRANSITIONS = 2  # Evita loops infinitos ao trocar de fase
 
     @staticmethod
     async def process_user_message(
@@ -116,7 +118,8 @@ class AIConversationService:
         )
 
         # 5. Processar imagens
-        image_urls = []
+        image_payloads: List[str] = []
+        image_references: List[str] = []
         if photo_file_ids and bot_token:
             for file_id in photo_file_ids:
                 try:
@@ -124,22 +127,12 @@ class AIConversationService:
                         file_id, bot_token
                     )
                     image_b64 = ImageHandler.convert_to_base64(image_bytes)
-                    image_urls.append(image_b64)
+                    image_payloads.append(image_b64)
+                    image_references.append(f"telegram_file:{file_id}")
                 except Exception as e:
                     logger.error("Failed to process image", extra={"error": str(e)})
 
-        # 6. Montar mensagens com status de ações
-        messages = await AIConversationService._build_messages_with_actions(
-            ai_config,
-            history,
-            current_phase,
-            text,
-            image_urls,
-            bot_id,
-            user_telegram_id,
-        )
-
-        # 7. Chamar Grok API com controle de concorrência
+        # 6. Chamar Grok API com controle de concorrência
         from core.config import settings
 
         grok_client = GrokAPIClient(
@@ -153,39 +146,121 @@ class AIConversationService:
             else "grok-4-fast-non-reasoning"
         )
 
-        api_response = await grok_client.chat_completion(
-            messages=messages,
-            model=model,
-            temperature=float(ai_config.temperature),
-            max_tokens=ai_config.max_tokens,
-        )
-
-        # 8. Extrair resposta
-        extracted = await grok_client.extract_response(api_response)
-        answer = extracted["content"]
-        usage = extracted["usage"]
-
-        # 9. Detectar trigger
         all_phases = await AIPhaseRepository.get_phases_by_bot(bot_id)
-        detected_trigger = PhaseDetectorService.detect_trigger(answer, all_phases)
 
-        if detected_trigger:
-            new_phase = await AIPhaseRepository.get_phase_by_trigger(
-                bot_id, detected_trigger
+        answer = ""
+        usage: Dict[str, Any] = {}
+        transitions = 0
+
+        while True:
+            messages = await AIConversationService._build_messages_with_actions(
+                ai_config,
+                history,
+                current_phase,
+                text,
+                image_payloads,
+                bot_id,
+                user_telegram_id,
             )
-            await UserAISessionRepository.update_current_phase(
-                bot_id, user_telegram_id, new_phase.id
+
+            # Credit precheck (silent block on failure)
+            from services.credits.credit_service import CreditService
+
+            allowed = await CreditService.precheck_text(
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                messages=messages,
+                max_tokens=ai_config.max_tokens,
+                tokenizer_call=grok_client.tokenize_text,
             )
-            logger.info(
-                "Phase transition detected",
-                extra={
-                    "bot_id": bot_id,
-                    "user_telegram_id": user_telegram_id,
-                    "detected_trigger": detected_trigger,
-                    "new_phase_id": new_phase.id,
-                    "new_phase_name": new_phase.phase_name,
-                },
+            if not allowed:
+                logger.info(
+                    "AI request blocked due to insufficient credits",
+                    extra={"bot_id": bot_id, "user": user_telegram_id},
+                )
+                try:
+                    from services.credits.metrics import CREDITS_BLOCKED_TOTAL
+
+                    CREDITS_BLOCKED_TOTAL.labels(type="text").inc()
+                except Exception:
+                    pass
+                await grok_client.close()
+                return None
+
+            api_response = await grok_client.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=float(ai_config.temperature),
+                max_tokens=ai_config.max_tokens,
             )
+
+            extracted = await grok_client.extract_response(api_response)
+            answer = extracted.get("content", "")
+            usage = extracted.get("usage", {})
+
+            detected_trigger = PhaseDetectorService.detect_trigger(answer, all_phases)
+
+            if detected_trigger:
+                new_phase = await AIPhaseRepository.get_phase_by_trigger(
+                    bot_id, detected_trigger
+                )
+
+                if (
+                    new_phase
+                    and (not current_phase or new_phase.id != current_phase.id)
+                    and transitions < AIConversationService.MAX_PHASE_TRANSITIONS
+                ):
+                    transitions += 1
+                    await UserAISessionRepository.update_current_phase(
+                        bot_id, user_telegram_id, new_phase.id
+                    )
+                    session.current_phase_id = new_phase.id
+                    current_phase = new_phase
+                    logger.info(
+                        "Phase transition detected",
+                        extra={
+                            "bot_id": bot_id,
+                            "user_telegram_id": user_telegram_id,
+                            "detected_trigger": detected_trigger,
+                            "new_phase_id": new_phase.id,
+                            "new_phase_name": new_phase.phase_name,
+                        },
+                    )
+                    continue
+
+                if new_phase and new_phase.id == (
+                    current_phase.id if current_phase else None
+                ):
+                    logger.warning(
+                        "Phase trigger matched current phase",
+                        extra={
+                            "bot_id": bot_id,
+                            "user_telegram_id": user_telegram_id,
+                            "trigger": detected_trigger,
+                        },
+                    )
+                elif transitions >= AIConversationService.MAX_PHASE_TRANSITIONS:
+                    logger.warning(
+                        "Max phase transitions reached",
+                        extra={
+                            "bot_id": bot_id,
+                            "user_telegram_id": user_telegram_id,
+                            "trigger": detected_trigger,
+                        },
+                    )
+                else:
+                    logger.warning(
+                        "Phase trigger detected but phase not found",
+                        extra={
+                            "bot_id": bot_id,
+                            "user_telegram_id": user_telegram_id,
+                            "trigger": detected_trigger,
+                        },
+                    )
+
+            break
+
+        answer = AIConversationService._sanitize_phase_triggers(answer, all_phases)
 
         # 10. Salvar histórico
         await ConversationHistoryRepository.add_message(
@@ -193,11 +268,11 @@ class AIConversationService:
             user_telegram_id=user_telegram_id,
             role="user",
             content=text,
-            has_image=len(image_urls) > 0,
-            image_url=image_urls[0] if image_urls else None,
+            has_image=len(image_payloads) > 0,
+            image_url=(image_references[0][:512] if image_references else None),
         )
 
-        await ConversationHistoryRepository.add_message(
+        assistant_msg = await ConversationHistoryRepository.add_message(
             bot_id=bot_id,
             user_telegram_id=user_telegram_id,
             role="assistant",
@@ -216,6 +291,15 @@ class AIConversationService:
         # 12. Incrementar contador
         await UserAISessionRepository.increment_message_count(bot_id, user_telegram_id)
 
+        # Post‑usage debit with accurate usage (async task, idempotent por mensagem)
+        try:
+            from workers.credits_tasks import debit_text_usage_task
+
+            if assistant_msg and getattr(assistant_msg, "id", None):
+                debit_text_usage_task.delay(bot_id, int(assistant_msg.id))
+        except Exception as e:  # pragma: no cover
+            logger.error("Enqueue debit task failed", extra={"error": str(e)})
+
         await grok_client.close()
 
         logger.info(
@@ -228,7 +312,30 @@ class AIConversationService:
             },
         )
 
-        # 13. Verificar se há ofertas na resposta da IA
+        # 13. Verificar se há descontos negociados
+        from services.offers.discount_service import DiscountService
+
+        discount_result = await DiscountService.process_ai_message_for_discounts(
+            bot_id=bot_id,
+            chat_id=user_telegram_id,
+            ai_message=answer,
+            bot_token=bot_token,
+            user_telegram_id=user_telegram_id,
+        )
+
+        if discount_result and discount_result.get("replaced_message"):
+            logger.info(
+                "Discount flow replaced AI message",
+                extra={
+                    "bot_id": bot_id,
+                    "user_telegram_id": user_telegram_id,
+                    "offer_id": discount_result.get("offer_id"),
+                    "value_cents": discount_result.get("value_cents"),
+                },
+            )
+            return None
+
+        # 14. Verificar se há ofertas na resposta da IA
         from services.offers.offer_service import OfferService
 
         offer_result = await OfferService.process_ai_message_for_offers(
@@ -253,7 +360,7 @@ class AIConversationService:
             # Retornar None para indicar que a mensagem foi substituída
             return None
 
-        # 14. Verificar trigger de upsell
+        # 15. Verificar trigger de upsell
         from services.upsell import TriggerDetector
         from workers.upsell_tasks import send_upsell_announcement_triggered
 
@@ -277,7 +384,7 @@ class AIConversationService:
         if offer_result and offer_result.get("should_append_pitch"):
             answer = f"{answer}__OFFER_DETECTED:{offer_result['offer_id']}__"
 
-        # 14. Verificar se há ações na resposta da IA
+        # 16. Verificar se há ações na resposta da IA
         from services.ai.actions import ActionService
 
         action_result = await ActionService.process_ai_message_for_actions(
@@ -306,7 +413,7 @@ class AIConversationService:
         if action_result and action_result.get("should_append_blocks"):
             answer = f"{answer}__ACTION_DETECTED:{action_result['action_id']}__"
 
-        # 15. Verificar se a IA enviou termo de verificação manual
+        # 17. Verificar se a IA enviou termo de verificação manual
         manual_verify_result = (
             await AIConversationService._check_manual_verification_trigger(
                 bot_id=bot_id,
@@ -330,12 +437,32 @@ class AIConversationService:
         return answer
 
     @staticmethod
+    def _sanitize_phase_triggers(answer: str, phases: List) -> str:
+        """Remove termos de trigger da resposta final antes de enviar ao usuário."""
+
+        if not answer:
+            return answer
+
+        sanitized = answer
+
+        for phase in phases or []:
+            trigger = getattr(phase, "phase_trigger", None)
+            if not trigger:
+                continue
+
+            pattern = re.compile(re.escape(trigger), re.IGNORECASE)
+            sanitized = pattern.sub("", sanitized)
+
+        sanitized = re.sub(r"\s{2,}", " ", sanitized)
+        return sanitized.strip()
+
+    @staticmethod
     async def _build_messages_with_actions(
         ai_config,
         history: List,
         current_phase,
         user_text: str,
-        image_urls: List[str],
+        image_payloads: List[str],
         bot_id: int,
         user_telegram_id: int,
     ) -> List[Dict[str, Any]]:
@@ -383,8 +510,10 @@ class AIConversationService:
             messages.append({"role": entry.role, "content": entry.content})
 
         # Mensagem atual
-        if image_urls:
-            user_message = ImageHandler.create_multimodal_message(user_text, image_urls)
+        if image_payloads:
+            user_message = ImageHandler.create_multimodal_message(
+                user_text, image_payloads
+            )
         else:
             user_message = ImageHandler.create_text_only_message(user_text)
 

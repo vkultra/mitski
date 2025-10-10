@@ -33,8 +33,10 @@ celery_app.conf.task_routes = {
     "workers.tasks.send_message": {"queue": "celery"},
     "workers.tasks.send_welcome": {"queue": "celery"},
     "workers.tasks.send_rate_limit_message": {"queue": "celery"},
+    "workers.start_tasks.*": {"queue": "celery"},
     "workers.payment_tasks.*": {"queue": "celery"},
     "workers.ai_tasks.*": {"queue": "celery"},
+    "workers.audio_tasks.*": {"queue": "audio"},
     "workers.upsell_tasks.*": {"queue": "celery"},
     "workers.recovery_scheduler.*": {"queue": "recovery"},
     "workers.recovery_sender.*": {"queue": "recovery"},
@@ -66,9 +68,12 @@ celery_app.autodiscover_tasks(["workers"])
 
 # Importar tasks explicitamente
 from workers import ai_tasks  # noqa: F401, E402
+from workers import audio_tasks  # noqa: F401, E402
+from workers import credits_tasks  # noqa: F401, E402
 from workers import mirror_tasks  # noqa: F401, E402
 from workers import notifications  # noqa: F401, E402
 from workers import payment_tasks  # noqa: F401, E402
 from workers import recovery_scheduler  # noqa: F401, E402
 from workers import recovery_sender  # noqa: F401, E402
+from workers import start_tasks  # noqa: F401, E402
 from workers import upsell_tasks  # noqa: F401, E402

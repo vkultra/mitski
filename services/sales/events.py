@@ -12,6 +12,8 @@ from core.notifications.dedup import (
 )
 from core.notifications.metrics import inc_enqueued
 from core.telemetry import logger
+from database.repos import BotRepository, PixTransactionRepository
+from services.tracking.service import TrackerService
 
 
 def emit_sale_approved(
@@ -25,6 +27,8 @@ def emit_sale_approved(
 
     Retorna ``True`` quando a tarefa foi enfileirada.
     """
+
+    _record_tracking_sale(transaction_identifier)
 
     if not settings.ENABLE_SALE_NOTIFICATIONS:
         logger.debug(
@@ -63,7 +67,11 @@ def emit_sale_approved(
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "Failed to enqueue sale notification",
-            extra={"transaction": transaction_identifier, "origin": origin, "error": str(exc)},
+            extra={
+                "transaction": transaction_identifier,
+                "origin": origin,
+                "error": str(exc),
+            },
         )
         return False
     finally:
@@ -72,3 +80,26 @@ def emit_sale_approved(
 
 
 __all__ = ["emit_sale_approved"]
+
+
+def _record_tracking_sale(transaction_identifier: str) -> None:
+    transaction = PixTransactionRepository.get_by_transaction_id_sync(
+        transaction_identifier
+    )
+    if not transaction:
+        return
+    bot = BotRepository.get_bot_by_id_sync(transaction.bot_id)
+    if not bot:
+        return
+    service = TrackerService(bot.admin_id)
+    try:
+        service.record_sale(transaction_id=transaction.id)
+    except Exception as exc:  # pragma: no cover - proteger tracking
+        logger.warning(
+            "Failed to record tracker sale",
+            extra={
+                "transaction": transaction_identifier,
+                "bot_id": transaction.bot_id,
+                "error": str(exc),
+            },
+        )

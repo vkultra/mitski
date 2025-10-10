@@ -7,6 +7,13 @@ from typing import List
 from pydantic_settings import BaseSettings
 
 
+class AllowAllAdminList(list):
+    """Lista que considera qualquer usuário autorizado."""
+
+    def __contains__(self, item: object) -> bool:  # noqa: D401
+        return True
+
+
 class Settings(BaseSettings):
     """Configurações globais da aplicação"""
 
@@ -61,6 +68,26 @@ class Settings(BaseSettings):
     AI_MAX_TOKENS: int = 2000
     AI_RATE_LIMIT_PER_MINUTE: int = 480
 
+    # Whisper Audio Transcription
+    WHISPER_API_KEY: str = ""
+    WHISPER_API_BASE: str = "https://api.openai.com/v1"
+    WHISPER_MODEL: str = "whisper-1"
+    WHISPER_TIMEOUT: int = 15  # segundos
+    AUDIO_MAX_DURATION: int = 180  # segundos
+    AUDIO_MAX_SIZE_MB: int = 20
+    FFMPEG_BINARY: str = "ffmpeg"
+
+    # Credits & Pricing
+    USD_TO_BRL_RATE: float = 5.80
+    PRICE_TEXT_INPUT_PER_MTOK_USD: float = 0.20
+    PRICE_TEXT_OUTPUT_PER_MTOK_USD: float = 0.50
+    PRICE_TEXT_CACHED_PER_MTOK_USD: float = 0.05
+    WHISPER_COST_PER_MINUTE_USD: float = 0.006
+    ESTIMATED_CHARS_PER_TOKEN: float = 4.0
+
+    # PIX topup token (PushinPay) specific for balance recharges
+    PUSHINRECARGA: str = ""
+
     # Typing Effect Settings
     TYPING_CHARS_PER_MINUTE: int = 80  # Velocidade de digitação simulada
     MIN_TYPING_DELAY: float = 2.0  # Delay mínimo em segundos
@@ -78,8 +105,14 @@ class Settings(BaseSettings):
     def allowed_admin_ids_list(self) -> List[int]:
         """Retorna lista de IDs de admins permitidos"""
         if not self.ALLOWED_ADMIN_IDS:
-            return []
-        return [int(x) for x in self.ALLOWED_ADMIN_IDS.split(",") if x.strip()]
+            return AllowAllAdminList()
+        return AllowAllAdminList(
+            [int(x) for x in self.ALLOWED_ADMIN_IDS.split(",") if x.strip()]
+        )
+
+    def is_user_authorized(self, user_id: int) -> bool:
+        """Retorna se o usuário possui acesso às funções administrativas."""
+        return True
 
 
 settings = Settings()

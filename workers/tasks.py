@@ -4,13 +4,20 @@ Tasks assíncronas do Celery
 
 import json
 import time
+from datetime import datetime
+from typing import Optional
 
+import httpx
 import requests
 
+from core.config import settings
 from core.rate_limiter import check_rate_limit
 from core.security import decrypt
 from core.telemetry import logger
 from database.repos import BotRepository
+from services.audio.metrics import record_audio_failure, record_audio_update
+from services.conversation_state import ConversationStateManager
+from services.tracking.runtime import handle_start as tracking_handle_start
 
 from .celery_app import celery_app
 
@@ -30,6 +37,11 @@ def process_telegram_update(self, bot_id: int, update: dict):
 
     message = update.get("message", {})
     user_id = message.get("from", {}).get("id")
+    bot_token_plain = decrypt(bot.token)
+    voice = message.get("voice")
+    audio_media = message.get("audio")
+    has_audio = bool(voice or audio_media)
+    audio_media_type = "voice" if voice else "audio"
 
     if not user_id:
         return
@@ -47,14 +59,66 @@ def process_telegram_update(self, bot_id: int, update: dict):
             extra={"bot_id": bot_id, "user_id": user_id, "error": str(exc)},
         )
 
+    if has_audio:
+        record_audio_update(bot_id, audio_media_type)
+        try:
+            media_keys = (
+                list((voice or audio_media).keys()) if (voice or audio_media) else []
+            )
+        except Exception:
+            media_keys = []
+        logger.info(
+            "Audio detected; scheduling processing",
+            extra={
+                "bot_id": bot_id,
+                "user_id": user_id,
+                "media_type": audio_media_type,
+                "media_keys": media_keys,
+            },
+        )
+
     # Rate limit por bot + usuário
     if not check_rate_limit(bot_id, user_id):
-        send_rate_limit_message.delay(bot.id, user_id)
+        if has_audio:
+            logger.info(
+                "Audio denied by global rate limit",
+                extra={"bot_id": bot_id, "user_id": user_id},
+            )
+            record_audio_failure(bot_id, "global_rate_limit")
+        else:
+            send_rate_limit_message.delay(bot.id, user_id)
         return
 
     text = message.get("text", "")
+    document = message.get("document")
     photos = message.get("photo", [])
     chat_id = message.get("chat", {}).get("id", user_id)
+
+    start_payload = (text or "").strip()
+    is_start_command = start_payload.startswith("/start")
+    start_status: Optional[str] = None
+
+    if is_start_command:
+        start_status, _ = tracking_handle_start(
+            bot_id=bot.id,
+            user_id=user_id,
+            message_text=start_payload,
+            now=datetime.utcnow(),
+        )
+        if start_status == "ignored":
+            return
+
+        from services.stats.event_recorder import record_start_event
+
+        record_start_event(bot_id=bot.id, user_telegram_id=user_id)
+
+        from services.start import StartFlowService
+
+        handled_start = asyncio.run(
+            StartFlowService.handle_start_command(bot, user_id, chat_id)
+        )
+        if handled_start:
+            return
 
     # ANTI-SPAM CHECK (antes de qualquer processamento)
     from core.redis_client import redis_client
@@ -124,7 +188,7 @@ def process_telegram_update(self, bot_id: int, update: dict):
             return  # Early exit
 
     # NOVO: Verificar se é comando de debug primeiro
-    if text and text.startswith("/"):
+    if text and text.startswith("/") and not is_start_command:
         from handlers.debug_commands_router import DebugCommandRouter
 
         # Tentar processar como comando de debug
@@ -134,7 +198,7 @@ def process_telegram_update(self, bot_id: int, update: dict):
                 chat_id=chat_id,
                 user_telegram_id=user_id,
                 text=text,
-                bot_token=decrypt(bot.token),
+                bot_token=bot_token_plain,
             )
         )
 
@@ -183,8 +247,72 @@ def process_telegram_update(self, bot_id: int, update: dict):
     }
     mirror_message.delay(bot_id, user_id, mirror_msg)
 
+    if text and text.startswith("/") and user_id == bot.admin_id:
+        from services.offers.discount_debug import try_handle_discount_debug_command
+
+        debug_discount_result = asyncio.run(
+            try_handle_discount_debug_command(
+                bot_id=bot_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                text=text,
+                bot_token=bot_token_plain,
+            )
+        )
+        if debug_discount_result.handled:
+            if debug_discount_result.reply:
+                send_message.delay(bot.id, user_id, debug_discount_result.reply)
+            return
+
+    if has_audio:
+        media_payload = voice if voice else audio_media
+        payload = {
+            "type": "voice" if voice else "audio",
+            "file_id": media_payload.get("file_id"),
+            "file_unique_id": media_payload.get("file_unique_id"),
+            "mime_type": media_payload.get("mime_type"),
+            "duration": media_payload.get("duration"),
+            "file_size": media_payload.get("file_size"),
+            "timestamp": message.get("date", time.time()),
+        }
+
+        if not check_rate_limit(bot_id, user_id, action="audio:upload"):
+            logger.info(
+                "Audio upload rate-limited",
+                extra={"bot_id": bot_id, "user_id": user_id},
+            )
+            record_audio_failure(bot_id, "audio_rate_limit")
+            return
+
+        from workers.audio_tasks import process_audio_message
+
+        process_audio_message.delay(
+            bot_id=bot_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            media=payload,
+        )
+        logger.info(
+            "Audio task enqueued",
+            extra={
+                "bot_id": bot_id,
+                "user_id": user_id,
+                "file_id": payload.get("file_id"),
+            },
+        )
+        return
+
     # NOVO: Verifica se bot tem IA ativada
     ai_config = AIConfigRepository.get_by_bot_id_sync(bot_id)
+
+    if text == "/start":
+        from services.start import StartFlowService
+
+        handled_start = asyncio.run(
+            StartFlowService.handle_start_command(bot, user_id, chat_id)
+        )
+        if handled_start:
+            return
 
     if ai_config and ai_config.is_enabled:
         # Processar com IA
@@ -197,11 +325,11 @@ def process_telegram_update(self, bot_id: int, update: dict):
             user_telegram_id=user_id,
             text=text,
             photo_file_ids=photo_file_ids,
-            bot_token=decrypt(bot.token),
+            bot_token=bot_token_plain,
         )
     else:
         # Fluxo normal (sem IA)
-        if text == "/start":
+        if is_start_command:
             from handlers.bot_handlers import handle_bot_start
 
             welcome_text = asyncio.run(handle_bot_start(bot.id, user_id))
@@ -219,6 +347,8 @@ def process_manager_update(self, update: dict):  # noqa: C901
     from handlers.manager_handlers import (
         handle_callback_add_bot,
         handle_callback_deactivate_menu,
+        handle_callback_delete_bot,
+        handle_callback_delete_confirm,
         handle_callback_list_bots,
         handle_deactivate,
         handle_start,
@@ -230,6 +360,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
         handle_delete_phase,
         handle_initial_phase_prompt_input,
         handle_list_phases,
+        handle_phase_download,
         handle_set_initial_phase,
         handle_view_phase,
     )
@@ -246,6 +377,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
         message_id = callback_query["message"]["message_id"]
         callback_data = callback_query.get("data", "")
 
+        if user_id:
+            ConversationStateManager.clear_state(user_id)
+
         # Usar asyncio.run() ao invés de criar/destruir loops
         response = None
 
@@ -255,12 +389,26 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.notifications.manager_menu import handle_notifications_menu
 
             response = asyncio.run(handle_notifications_menu(user_id))
+        elif callback_data == "tracking_menu":
+            from handlers.tracking.menu import handle_tracking_menu
+
+            response = asyncio.run(handle_tracking_menu(user_id))
+        elif callback_data == "stats_menu":
+            from handlers.stats_handlers import handle_stats_menu
+
+            response = asyncio.run(handle_stats_menu(user_id))
+        elif callback_data.startswith("stats:"):
+            from handlers.stats_handlers import handle_stats_callback
+
+            response = asyncio.run(handle_stats_callback(user_id, callback_data))
         elif callback_data == "notifications_view":
             from handlers.notifications.manager_menu import handle_notifications_view
 
             response = asyncio.run(handle_notifications_view(user_id))
         elif callback_data == "notifications_configure":
-            from handlers.notifications.manager_menu import handle_notifications_configure
+            from handlers.notifications.manager_menu import (
+                handle_notifications_configure,
+            )
 
             response = asyncio.run(handle_notifications_configure(user_id))
         elif callback_data == "notifications_disable":
@@ -272,36 +420,82 @@ def process_manager_update(self, update: dict):  # noqa: C901
 
             response = asyncio.run(handle_notifications_test(user_id))
         elif callback_data == "notifications_configure_default":
-            from handlers.notifications.manager_menu import handle_notifications_configure_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_configure_scope,
+            )
 
             response = asyncio.run(handle_notifications_configure_scope(user_id, None))
         elif callback_data.startswith("notifications_configure_bot:"):
-            from handlers.notifications.manager_menu import handle_notifications_configure_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_configure_scope,
+            )
 
             bot_id = int(callback_data.split(":")[1])
-            response = asyncio.run(handle_notifications_configure_scope(user_id, bot_id))
+            response = asyncio.run(
+                handle_notifications_configure_scope(user_id, bot_id)
+            )
         elif callback_data == "notifications_disable_default":
-            from handlers.notifications.manager_menu import handle_notifications_disable_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_disable_scope,
+            )
 
             response = asyncio.run(handle_notifications_disable_scope(user_id, None))
         elif callback_data.startswith("notifications_disable_bot:"):
-            from handlers.notifications.manager_menu import handle_notifications_disable_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_disable_scope,
+            )
 
             bot_id = int(callback_data.split(":")[1])
             response = asyncio.run(handle_notifications_disable_scope(user_id, bot_id))
         elif callback_data == "notifications_test_default":
-            from handlers.notifications.manager_menu import handle_notifications_test_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_test_scope,
+            )
 
             response = asyncio.run(handle_notifications_test_scope(user_id, None))
+        elif callback_data == "credits_menu":
+            from handlers.credits_handlers import handle_credits_menu
+
+            response = asyncio.run(handle_credits_menu(user_id))
+        elif callback_data == "credits_add":
+            from handlers.credits_handlers import handle_credits_add
+
+            response = asyncio.run(handle_credits_add(user_id))
+        elif callback_data == "credits_list":
+            from handlers.credits_handlers import handle_credits_list
+
+            response = asyncio.run(handle_credits_list(user_id))
+        elif callback_data.startswith("credits_amount:"):
+            from handlers.credits_handlers import handle_credits_amount_click
+
+            cents = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_credits_amount_click(user_id, cents))
+        elif callback_data.startswith("credits_check:"):
+            from handlers.credits_handlers import handle_credits_check
+
+            tid = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_credits_check(user_id, tid))
         elif callback_data.startswith("notifications_test_bot:"):
-            from handlers.notifications.manager_menu import handle_notifications_test_scope
+            from handlers.notifications.manager_menu import (
+                handle_notifications_test_scope,
+            )
 
             bot_id = int(callback_data.split(":")[1])
             response = asyncio.run(handle_notifications_test_scope(user_id, bot_id))
+        elif callback_data.startswith("trk:"):
+            from handlers.tracking.menu import handle_tracking_callback
+
+            response = asyncio.run(handle_tracking_callback(user_id, callback_data))
         elif callback_data == "list_bots":
             response = asyncio.run(handle_callback_list_bots(user_id))
         elif callback_data == "deactivate_menu":
             response = asyncio.run(handle_callback_deactivate_menu(user_id))
+        elif callback_data.startswith("delete_confirm:"):
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_callback_delete_confirm(user_id, bot_id))
+        elif callback_data.startswith("delete_bot:"):
+            bot_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_callback_delete_bot(user_id, bot_id))
         elif callback_data.startswith("deactivate:"):
             bot_id = int(callback_data.split(":")[1])
             response_text = asyncio.run(handle_deactivate(user_id, bot_id))
@@ -346,6 +540,23 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.ai_handlers import handle_general_prompt_click
 
             response = asyncio.run(handle_general_prompt_click(user_id, bot_id))
+        elif callback_data.startswith("ai_general_edit:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai_handlers import handle_general_prompt_edit
+
+            response = asyncio.run(handle_general_prompt_edit(user_id, bot_id))
+        elif callback_data.startswith("ai_general_upload:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai_handlers import handle_general_prompt_upload_request
+
+            response = asyncio.run(
+                handle_general_prompt_upload_request(user_id, bot_id)
+            )
+        elif callback_data.startswith("ai_general_download:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai_handlers import handle_general_prompt_download
+
+            response = asyncio.run(handle_general_prompt_download(user_id, bot_id))
         elif callback_data.startswith("ai_create_phase:"):
             bot_id = int(callback_data.split(":")[1])
             from handlers.ai_handlers import handle_create_phase_click
@@ -369,6 +580,19 @@ def process_manager_update(self, update: dict):  # noqa: C901
         elif callback_data.startswith("ai_set_initial:"):
             phase_id = int(callback_data.split(":")[1])
             response = asyncio.run(handle_set_initial_phase(user_id, phase_id))
+        elif callback_data.startswith("ai_phase_edit:"):
+            phase_id = int(callback_data.split(":")[1])
+            from handlers.phase_handlers import handle_phase_edit_prompt
+
+            response = asyncio.run(handle_phase_edit_prompt(user_id, phase_id))
+        elif callback_data.startswith("ai_phase_upload:"):
+            phase_id = int(callback_data.split(":")[1])
+            from handlers.phase_handlers import handle_phase_upload_request
+
+            response = asyncio.run(handle_phase_upload_request(user_id, phase_id))
+        elif callback_data.startswith("ai_phase_download:"):
+            phase_id = int(callback_data.split(":")[1])
+            response = asyncio.run(handle_phase_download(user_id, phase_id))
         elif callback_data.startswith("ai_confirm_delete:"):
             phase_id = int(callback_data.split(":")[1])
             response = asyncio.run(handle_confirm_delete_phase(user_id, phase_id))
@@ -521,6 +745,70 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.offers import handle_preview_deliverable
 
             response = asyncio.run(handle_preview_deliverable(user_id, offer_id))
+        # Descontos (ofertas)
+        elif callback_data.startswith("disc_m:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.offers import handle_discount_menu_from_token
+
+            response = asyncio.run(handle_discount_menu_from_token(user_id, token))
+        elif callback_data.startswith("disc_t:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.offers import handle_discount_trigger_prompt
+
+            response = asyncio.run(handle_discount_trigger_prompt(user_id, token))
+        elif callback_data.startswith("disc_a:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.offers import handle_discount_block_create
+
+            response = asyncio.run(handle_discount_block_create(user_id, token))
+        elif callback_data.startswith("disc_p:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.offers import handle_discount_preview
+
+            response = asyncio.run(handle_discount_preview(user_id, token))
+        elif callback_data.startswith("disc_b:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.offers import (
+                get_discount_token_action,
+                handle_discount_block_autodel_click,
+                handle_discount_block_delay_click,
+                handle_discount_block_delete,
+                handle_discount_block_effects_click,
+                handle_discount_block_media_click,
+                handle_discount_block_text_click,
+                handle_discount_block_view,
+            )
+
+            action = get_discount_token_action(token)
+            if action == "v":
+                response = asyncio.run(handle_discount_block_view(user_id, token))
+            elif action == "t":
+                response = asyncio.run(handle_discount_block_text_click(user_id, token))
+            elif action == "m":
+                response = asyncio.run(
+                    handle_discount_block_media_click(user_id, token)
+                )
+            elif action == "e":
+                response = asyncio.run(
+                    handle_discount_block_effects_click(user_id, token)
+                )
+            elif action == "l":
+                response = asyncio.run(
+                    handle_discount_block_delay_click(user_id, token)
+                )
+            elif action == "o":
+                response = asyncio.run(
+                    handle_discount_block_autodel_click(user_id, token)
+                )
+            elif action == "d":
+                response = asyncio.run(handle_discount_block_delete(user_id, token))
+            else:
+                response = {
+                    "callback_alert": {
+                        "text": "⚠️ Ação inválida ou expirada.",
+                        "show_alert": True,
+                    }
+                }
         # Manual verification routes
         elif callback_data.startswith("manver_menu:"):
             offer_id = int(callback_data.split(":")[1])
@@ -1037,6 +1325,20 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.upsell.phase_handlers import handle_phase_edit_click
 
             response = asyncio.run(handle_phase_edit_click(user_id, upsell_id))
+        elif callback_data.startswith("upsell_phase_upload:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.phase_handlers import (
+                handle_upsell_phase_upload_request,
+            )
+
+            response = asyncio.run(
+                handle_upsell_phase_upload_request(user_id, upsell_id)
+            )
+        elif callback_data.startswith("upsell_phase_download:"):
+            upsell_id = int(callback_data.split(":")[1])
+            from handlers.upsell.phase_handlers import handle_upsell_phase_download
+
+            response = asyncio.run(handle_upsell_phase_download(user_id, upsell_id))
         elif callback_data.startswith("upsell_schedule:"):
             upsell_id = int(callback_data.split(":")[1])
             from handlers.upsell.schedule_handlers import handle_schedule_menu
@@ -1146,6 +1448,100 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     user_id, callback_data, callback_query["id"]
                 )
             )
+        # Start template callbacks
+        elif callback_data.startswith("start_template_info:"):
+            response = {
+                "callback_alert": {
+                    "text": "Use o botão Configurar para definir a mensagem inicial enviada no primeiro /start.",
+                    "show_alert": True,
+                }
+            }
+        elif callback_data.startswith("start_template_menu:"):
+            bot_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_menu_handlers import (
+                handle_start_template_menu,
+            )
+
+            response = asyncio.run(handle_start_template_menu(user_id, bot_id))
+        elif callback_data.startswith("start_block_add:"):
+            template_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_menu_handlers import (
+                handle_start_template_add_block,
+            )
+
+            response = asyncio.run(
+                handle_start_template_add_block(user_id, template_id)
+            )
+        elif callback_data.startswith("start_block_delete:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_menu_handlers import (
+                handle_start_template_delete_block,
+            )
+
+            response = asyncio.run(
+                handle_start_template_delete_block(user_id, block_id)
+            )
+        elif callback_data.startswith("start_toggle:"):
+            template_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_menu_handlers import (
+                handle_start_template_toggle,
+            )
+
+            response = asyncio.run(handle_start_template_toggle(user_id, template_id))
+        elif callback_data.startswith("start_preview:"):
+            template_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_menu_handlers import (
+                handle_start_template_preview,
+            )
+
+            response = asyncio.run(handle_start_template_preview(user_id, template_id))
+        elif callback_data.startswith("start_block_view:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_view_block,
+            )
+
+            response = asyncio.run(handle_start_template_view_block(user_id, block_id))
+        elif callback_data.startswith("start_block_text:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_text_click,
+            )
+
+            response = asyncio.run(handle_start_template_text_click(user_id, block_id))
+        elif callback_data.startswith("start_block_media:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_media_click,
+            )
+
+            response = asyncio.run(handle_start_template_media_click(user_id, block_id))
+        elif callback_data.startswith("start_block_effects:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_effects_click,
+            )
+
+            response = asyncio.run(
+                handle_start_template_effects_click(user_id, block_id)
+            )
+        elif callback_data.startswith("start_block_delay:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_delay_click,
+            )
+
+            response = asyncio.run(handle_start_template_delay_click(user_id, block_id))
+        elif callback_data.startswith("start_block_autodel:"):
+            block_id = int(callback_data.split(":")[1])
+            from handlers.ai.start_template_block_handlers import (
+                handle_start_template_autodel_click,
+            )
+
+            response = asyncio.run(
+                handle_start_template_autodel_click(user_id, block_id)
+            )
+
         # Action menu callbacks
         elif callback_data.startswith("action_menu:"):
             bot_id = int(callback_data.split(":")[1])
@@ -1231,30 +1627,143 @@ def process_manager_update(self, update: dict):  # noqa: C901
             from handlers.ai.action_block_handlers import handle_action_block_view
 
             response = asyncio.run(handle_action_block_view(user_id, block_id))
+        elif callback_data.startswith("aud_i:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_popup
+
+            response = asyncio.run(handle_audio_popup(user_id, token))
+        elif callback_data.startswith("aud_m:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_menu_from_token
+
+            response = asyncio.run(handle_audio_menu_from_token(user_id, token))
+        elif callback_data.startswith("aud_o:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_toggle
+
+            response = asyncio.run(handle_audio_toggle(user_id, token))
+        elif callback_data.startswith("aud_r:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_set_reply
+
+            response = asyncio.run(handle_audio_set_reply(user_id, token))
+        elif callback_data.startswith("audio_info:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_popup
+
+            response = asyncio.run(handle_audio_popup(user_id, token))
+        elif callback_data.startswith("audio_menu:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_menu_from_token
+
+            response = asyncio.run(handle_audio_menu_from_token(user_id, token))
+        elif callback_data.startswith("audio_toggle:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_toggle
+
+            response = asyncio.run(handle_audio_toggle(user_id, token))
+        elif callback_data.startswith("audio_set_reply:"):
+            token = callback_data.split(":", 1)[1]
+            from handlers.ai.audio_menu_handlers import handle_audio_set_reply
+
+            response = asyncio.run(handle_audio_set_reply(user_id, token))
         elif callback_data == "back_to_main":
             response = asyncio.run(handle_start(user_id))
+
+        callback_alert_payload = None
+        if isinstance(response, dict) and "callback_alert" in response:
+            callback_alert_payload = response.pop("callback_alert")
+            # Se sobraram apenas campos vazios, limpar response
+            if not any(key in response for key in ("text", "keyboard", "chart_path")):
+                response = None
 
         # Responder callback IMEDIATAMENTE (antes de editar mensagem)
         # para evitar timeout do Telegram (~5 segundos)
         try:
-            telegram_api.answer_callback_query_sync(
-                token=manager_token, callback_query_id=callback_query["id"]
-            )
+            if callback_alert_payload:
+                telegram_api.answer_callback_query_sync(
+                    token=manager_token,
+                    callback_query_id=callback_query["id"],
+                    text=callback_alert_payload.get("text"),
+                    show_alert=callback_alert_payload.get("show_alert", False),
+                )
+            else:
+                telegram_api.answer_callback_query_sync(
+                    token=manager_token, callback_query_id=callback_query["id"]
+                )
         except Exception as e:
             logger.warning(
                 "Falha ao responder callback (provavelmente expirado)",
                 extra={"callback_id": callback_query["id"], "error": str(e)},
             )
 
-        # Se houver response, editar mensagem
+        # Se houver response, tentar editar mensagem; se falhar, enviar nova
         if response:
-            telegram_api.edit_message_sync(
+            parse_mode = (
+                response.get("parse_mode", "Markdown")
+                if isinstance(response, dict)
+                else "Markdown"
+            )
+            edit_result = telegram_api.edit_message_sync(
                 token=manager_token,
                 chat_id=chat_id,
                 message_id=message_id,
                 text=response["text"],
                 keyboard=response.get("keyboard"),
+                parse_mode=parse_mode,
             )
+            try:
+                ok = bool(edit_result.get("ok", True))
+                desc = str(edit_result.get("description", "")).lower()
+                if not ok and "message is not modified" in desc:
+                    ok = True  # alteração idêntica, considerado sucesso
+            except Exception:
+                ok = True
+            if not ok:
+                # Fallback: enviar nova mensagem quando edição não for possível
+                try:
+                    telegram_api.send_message_sync(
+                        token=manager_token,
+                        chat_id=chat_id,
+                        text=response["text"],
+                        keyboard=response.get("keyboard"),
+                        parse_mode=parse_mode,
+                    )
+                except httpx.HTTPError as exc:  # pragma: no cover - fallback defensivo
+                    error_desc = ""
+                    try:
+                        error_desc = exc.response.json().get("description", "")
+                    except Exception:
+                        error_desc = str(exc)
+                    logger.warning(
+                        "Fallback sendMessage failed",
+                        extra={
+                            "error": str(exc),
+                            "description": error_desc,
+                            "chat_id": chat_id,
+                            "callback": callback_data,
+                        },
+                    )
+            chart_path = response.get("chart_path")
+            if chart_path:
+                try:
+                    telegram_api.edit_message_media_sync(
+                        token=manager_token,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        photo_path=str(chart_path),
+                        caption=response.get("chart_caption", response.get("text")),
+                        keyboard=response.get("keyboard"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to attach stats chart",
+                        extra={
+                            "chat_id": chat_id,
+                            "user_id": user_id,
+                            "error": str(exc),
+                        },
+                    )
         return
 
     # Processar mensagem de texto
@@ -1280,6 +1789,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
     response = None
 
     if text == "/start":
+        ConversationStateManager.clear_state(user_id)
         response = asyncio.run(handle_start(user_id))
     else:
         # Tenta processar como entrada de estado conversacional
@@ -1287,15 +1797,110 @@ def process_manager_update(self, update: dict):  # noqa: C901
 
         # Se não tem estado de bot, verifica estado de IA
         if not response:
-            from services.conversation_state import ConversationStateManager
-
             state_data = ConversationStateManager.get_state(user_id)
 
             if state_data:
                 state = state_data.get("state")
                 data = state_data.get("data", {})
 
-                if state == "awaiting_general_prompt":
+                document_payload = message.get("document")
+
+                if document_payload:
+                    manager_token = settings.MANAGER_BOT_TOKEN
+
+                    if state in {
+                        "awaiting_general_prompt_file",
+                        "awaiting_general_prompt",
+                    }:
+                        from handlers.ai_handlers import (
+                            handle_general_prompt_document_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_general_prompt_document_input(
+                                user_id,
+                                data["bot_id"],
+                                document_payload,
+                                manager_token,
+                            )
+                        )
+
+                    elif state in {
+                        "awaiting_phase_prompt_file",
+                        "awaiting_phase_prompt_update",
+                    }:
+                        from handlers.phase_handlers import (
+                            handle_phase_prompt_document_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_phase_prompt_document_input(
+                                user_id,
+                                data["phase_id"],
+                                document_payload,
+                                manager_token,
+                            )
+                        )
+
+                    elif state == "awaiting_phase_prompt":
+                        from handlers.ai_handlers import handle_phase_prompt_input
+                        from services.files import TxtFileError, download_txt_document
+
+                        try:
+                            prompt_text = asyncio.run(
+                                download_txt_document(manager_token, document_payload)
+                            )
+                        except TxtFileError as exc:
+                            response = {"text": f"❌ {exc}", "keyboard": None}
+                        else:
+                            response = asyncio.run(
+                                handle_phase_prompt_input(
+                                    user_id,
+                                    data["bot_id"],
+                                    data["name"],
+                                    data["trigger"],
+                                    prompt_text,
+                                )
+                            )
+
+                    elif state == "awaiting_initial_phase_prompt":
+                        from services.files import TxtFileError, download_txt_document
+
+                        try:
+                            prompt_text = asyncio.run(
+                                download_txt_document(manager_token, document_payload)
+                            )
+                        except TxtFileError as exc:
+                            response = {"text": f"❌ {exc}", "keyboard": None}
+                        else:
+                            response = asyncio.run(
+                                handle_initial_phase_prompt_input(
+                                    user_id,
+                                    data["bot_id"],
+                                    prompt_text,
+                                )
+                            )
+
+                    elif state in {
+                        "awaiting_upsell_phase_prompt_file",
+                        "awaiting_upsell_phase_prompt",
+                    }:
+                        from handlers.upsell.phase_handlers import (
+                            handle_upsell_phase_prompt_document_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_upsell_phase_prompt_document_input(
+                                user_id,
+                                data["upsell_id"],
+                                document_payload,
+                                manager_token,
+                            )
+                        )
+
+                if response:
+                    pass
+                elif state == "awaiting_general_prompt":
                     from handlers.ai_handlers import handle_general_prompt_input
 
                     response = asyncio.run(
@@ -1327,10 +1932,31 @@ def process_manager_update(self, update: dict):  # noqa: C901
                         )
                     )
 
+                elif state == "awaiting_phase_prompt_update":
+                    from handlers.phase_handlers import handle_phase_prompt_update_input
+
+                    response = asyncio.run(
+                        handle_phase_prompt_update_input(
+                            user_id, data["phase_id"], text
+                        )
+                    )
+
                 elif state == "awaiting_initial_phase_prompt":
                     response = asyncio.run(
                         handle_initial_phase_prompt_input(user_id, data["bot_id"], text)
                     )
+
+                elif state == "awaiting_general_prompt_file":
+                    response = {
+                        "text": "📂 Para continuar, envie o arquivo .txt como documento (clipe de papel).",
+                        "keyboard": None,
+                    }
+
+                elif state == "awaiting_phase_prompt_file":
+                    response = {
+                        "text": "📂 Envie o arquivo .txt com o prompt da fase como documento.",
+                        "keyboard": None,
+                    }
 
                 elif state == "awaiting_recovery_schedule":
                     from handlers.recovery import handle_recovery_schedule_input
@@ -1423,6 +2049,37 @@ def process_manager_update(self, update: dict):  # noqa: C901
                         )
                     )
 
+                elif state == "awaiting_start_block_text":
+                    from handlers.ai.start_template_block_handlers import (
+                        handle_start_template_text_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_start_template_text_input(
+                            user_id, data["block_id"], data["template_id"], text
+                        )
+                    )
+                elif state == "awaiting_start_block_delay":
+                    from handlers.ai.start_template_block_handlers import (
+                        handle_start_template_delay_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_start_template_delay_input(
+                            user_id, data["block_id"], data["template_id"], text
+                        )
+                    )
+                elif state == "awaiting_start_block_autodel":
+                    from handlers.ai.start_template_block_handlers import (
+                        handle_start_template_autodel_input,
+                    )
+
+                    response = asyncio.run(
+                        handle_start_template_autodel_input(
+                            user_id, data["block_id"], data["template_id"], text
+                        )
+                    )
+
                 elif state == "awaiting_block_text":
                     from handlers.offers import handle_block_text_input
 
@@ -1445,6 +2102,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     # Handle media upload
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1459,6 +2117,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1490,6 +2151,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                 elif state == "awaiting_recovery_block_media":
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1503,6 +2165,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1535,6 +2200,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     # Processar mídia para bloco de ação
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1549,6 +2215,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1569,6 +2238,56 @@ def process_manager_update(self, update: dict):  # noqa: C901
                                 user_id,
                                 data["block_id"],
                                 data["action_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Por favor, envie uma mídia (foto, vídeo, áudio, gif ou documento).",
+                            "keyboard": None,
+                        }
+
+                elif state == "awaiting_start_block_media":
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    voice = message.get("voice")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.ai.start_template_block_handlers import (
+                            handle_start_template_media_input,
+                        )
+
+                        response = asyncio.run(
+                            handle_start_template_media_input(
+                                user_id,
+                                data["block_id"],
+                                data["template_id"],
                                 media_file_id,
                                 media_type,
                             )
@@ -1629,6 +2348,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     # Handle media upload
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1643,6 +2363,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1670,6 +2393,53 @@ def process_manager_update(self, update: dict):  # noqa: C901
                             "text": "❌ Tipo de mídia não suportado. Envie foto, vídeo, áudio, gif ou documento.",
                             "keyboard": None,
                         }
+                elif state == "awaiting_disc_block_media":
+                    photos = message.get("photo", [])
+                    video = message.get("video")
+                    voice = message.get("voice")
+                    audio = message.get("audio")
+                    document = message.get("document")
+                    animation = message.get("animation")
+
+                    media_file_id = None
+                    media_type = None
+
+                    if photos:
+                        media_file_id = photos[-1]["file_id"]
+                        media_type = "photo"
+                    elif video:
+                        media_file_id = video["file_id"]
+                        media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
+                    elif audio:
+                        media_file_id = audio["file_id"]
+                        media_type = "audio"
+                    elif document:
+                        media_file_id = document["file_id"]
+                        media_type = "document"
+                    elif animation:
+                        media_file_id = animation["file_id"]
+                        media_type = "animation"
+
+                    if media_file_id:
+                        from handlers.offers import handle_discount_block_media_input
+
+                        response = asyncio.run(
+                            handle_discount_block_media_input(
+                                user_id,
+                                data["offer_id"],
+                                data["block_id"],
+                                media_file_id,
+                                media_type,
+                            )
+                        )
+                    else:
+                        response = {
+                            "text": "❌ Tipo de mídia não suportado. Envie foto, vídeo, áudio, gif ou documento.",
+                            "keyboard": None,
+                        }
 
                 elif state == "awaiting_deliv_block_delay":
                     from handlers.offers import handle_deliverable_block_delay_input
@@ -1686,6 +2456,45 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     response = asyncio.run(
                         handle_deliverable_block_autodel_input(
                             user_id, data["block_id"], data["offer_id"], text
+                        )
+                    )
+                elif state == "awaiting_disc_trigger":
+                    from handlers.offers import handle_discount_trigger_input
+
+                    response = asyncio.run(
+                        handle_discount_trigger_input(user_id, data["offer_id"], text)
+                    )
+                elif state == "awaiting_disc_block_text":
+                    from handlers.offers import handle_discount_block_text_input
+
+                    response = asyncio.run(
+                        handle_discount_block_text_input(
+                            user_id,
+                            data["offer_id"],
+                            data["block_id"],
+                            text,
+                        )
+                    )
+                elif state == "awaiting_disc_block_delay":
+                    from handlers.offers import handle_discount_block_delay_input
+
+                    response = asyncio.run(
+                        handle_discount_block_delay_input(
+                            user_id,
+                            data["offer_id"],
+                            data["block_id"],
+                            text,
+                        )
+                    )
+                elif state == "awaiting_disc_block_autodel":
+                    from handlers.offers import handle_discount_block_autodel_input
+
+                    response = asyncio.run(
+                        handle_discount_block_autodel_input(
+                            user_id,
+                            data["offer_id"],
+                            data["block_id"],
+                            text,
                         )
                     )
 
@@ -1714,6 +2523,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     # Handle media upload
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1727,6 +2537,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1818,6 +2631,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                 elif state == "awaiting_upsell_ann_media":
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1831,6 +2645,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1898,6 +2715,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
                 elif state == "awaiting_upsell_del_media":
                     photos = message.get("photo", [])
                     video = message.get("video")
+                    voice = message.get("voice")
                     audio = message.get("audio")
                     document = message.get("document")
                     animation = message.get("animation")
@@ -1911,6 +2729,9 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     elif video:
                         media_file_id = video["file_id"]
                         media_type = "video"
+                    elif voice:
+                        media_file_id = voice["file_id"]
+                        media_type = "voice"
                     elif audio:
                         media_file_id = audio["file_id"]
                         media_type = "audio"
@@ -1970,6 +2791,12 @@ def process_manager_update(self, update: dict):  # noqa: C901
                     response = asyncio.run(
                         handle_phase_prompt_input(user_id, data["upsell_id"], text)  # type: ignore
                     )
+
+                elif state == "awaiting_upsell_phase_prompt_file":
+                    response = {
+                        "text": "📂 Envie o arquivo .txt com o prompt da fase como documento.",
+                        "keyboard": None,
+                    }
 
                 elif state == "awaiting_upsell_sched_days":
                     from handlers.upsell.schedule_handlers import (
@@ -2081,6 +2908,7 @@ def process_manager_update(self, update: dict):  # noqa: C901
             chat_id=chat_id,
             text=response["text"],
             keyboard=response.get("keyboard"),
+            parse_mode=response.get("parse_mode", "Markdown"),
         )
 
 

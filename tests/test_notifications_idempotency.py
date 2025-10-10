@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from core.notifications.dedup import (
-    acquire_sale_lock,
-    release_sale_lock,
-)
+from core.notifications.dedup import acquire_sale_lock, release_sale_lock
 
 
 def test_sale_lock_acquire_and_release(fake_redis):
@@ -24,4 +21,3 @@ def test_sale_lock_acquire_and_release(fake_redis):
         # Release e acquire novamente deve funcionar
         release_sale_lock(tx)
         assert acquire_sale_lock(tx) is True
-

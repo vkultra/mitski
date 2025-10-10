@@ -30,8 +30,14 @@ def format_settings_summary(
         (setting for setting in settings_list if setting.bot_id is None), None
     )
     if default_setting:
-        status = "Ativo" if default_setting.enabled and default_setting.channel_id else "Inativo"
-        channel = f"`{default_setting.channel_id}`" if default_setting.channel_id else "—"
+        status = (
+            "Ativo"
+            if default_setting.enabled and default_setting.channel_id
+            else "Inativo"
+        )
+        channel = (
+            f"`{default_setting.channel_id}`" if default_setting.channel_id else "—"
+        )
         summary_lines.append(f"• Padrão: {status} (canal {channel})")
     else:
         summary_lines.append("• Padrão: não configurado")
@@ -67,7 +73,11 @@ def _parse_channel_identifier(raw: str) -> str | int:
 
 
 def _back_keyboard() -> Dict[str, list[list[dict[str, str]]]]:
-    return {"inline_keyboard": [[{"text": "⬅️ Voltar", "callback_data": "notifications_menu"}]]}
+    return {
+        "inline_keyboard": [
+            [{"text": "⬅️ Voltar", "callback_data": "notifications_menu"}]
+        ]
+    }
 
 
 async def validate_and_save_channel(
@@ -88,7 +98,9 @@ async def validate_and_save_channel(
             "Failed to fetch chat for notifications",
             extra={"user_id": user_id, "channel": raw_channel, "error": str(exc)},
         )
-        raise NotificationValidationError("Não foi possível encontrar esse canal. Verifique o identificador.")
+        raise NotificationValidationError(
+            "Não foi possível encontrar esse canal. Verifique o identificador."
+        )
 
     if chat.get("type") != "channel":
         raise NotificationValidationError("Informe um canal público ou privado válido.")
@@ -129,9 +141,7 @@ async def send_test_notification(
     settings_obj: NotificationSettings,
 ) -> None:
     if not settings.MANAGER_BOT_TOKEN:
-        raise NotificationValidationError(
-            "Token do bot gerenciador não configurado."
-        )
+        raise NotificationValidationError("Token do bot gerenciador não configurado.")
 
     bot_username = None
     if bot_id is not None:

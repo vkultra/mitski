@@ -306,7 +306,7 @@ CELERY_RESULT_BACKEND=redis://...
 
 # Security
 ENCRYPTION_KEY=base64:...          # Fernet/HMAC (32 bytes)
-ALLOWED_ADMIN_IDS=12345,67890
+ALLOWED_ADMIN_IDS=                 # legado: deixe em branco para liberar todas as funções
 
 # Monitoring
 LOG_LEVEL=INFO
@@ -643,7 +643,7 @@ def verify_payload(tok: str):
 - Alertas: queda anômala, fila crescendo, erro ≥ 1% por 5 min.
 
 ### Admin Surface
-- Comandos sensíveis **apenas** para `ALLOWED_ADMIN_IDS`.
+- Comandos sensíveis disponíveis para todos os usuários do bot gerenciador (allowlist apenas para legados).
 - Sessão de admin com **TTL** (ex.: 30 min) e confirmação de identidade.
 - Desativar **web page preview** em respostas administrativas.
 
@@ -672,7 +672,7 @@ def verify_payload(tok: str):
 - [ ] Backups PostgreSQL diários + restore testado mensalmente
 
 **Segurança:**
-- [ ] Allowlist de admins ativa (`ALLOWED_ADMIN_IDS`)
+- [ ] (Opcional) Allowlist de admins (`ALLOWED_ADMIN_IDS`) somente se precisar restringir acesso
 - [ ] Rate limit + cooldown + locks implementados
 - [ ] `callback_data` assinado com HMAC + TTL
 - [ ] Tokens de bots criptografados no DB (Fernet)

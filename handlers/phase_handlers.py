@@ -10,11 +10,24 @@ Responsável por:
 - Definir fase inicial
 """
 
+import re
 from typing import Any, Dict
 
 from core.config import settings
 from services.ai.phase_service import AIPhaseService
 from services.conversation_state import ConversationStateManager
+from services.files import (
+    TxtFileError,
+    build_preview,
+    download_txt_document,
+    make_txt_stream,
+)
+from workers.api_clients import TelegramAPI
+
+
+def _phase_filename(phase_name: str, phase_id: int) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", (phase_name or "").lower()).strip("_") or "fase"
+    return f"fase_{phase_id}_{slug}.txt"
 
 
 async def handle_create_initial_phase_click(
@@ -53,7 +66,11 @@ async def handle_initial_phase_prompt_input(
         ConversationStateManager.clear_state(user_id)
 
         return {
-            "text": "✅ Fase inicial criada!\n\nTodos os novos usuários começarão nesta fase.",
+            "text": (
+                "✅ Fase inicial criada!\n"
+                f"Caracteres do prompt: {len(prompt)}\n\n"
+                "Todos os novos usuários começarão nesta fase."
+            ),
             "keyboard": None,
         }
     except ValueError as e:
@@ -152,16 +169,24 @@ async def handle_view_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
         return {"text": "❌ Fase não encontrada.", "keyboard": None}
 
     # Texto descritivo
+    prompt = phase.phase_prompt or ""
+    preview = build_preview(prompt, max_chars=300)
+    preview_safe = preview.replace("`", r"\`")
+
     if phase.is_initial:
         text = f"⭐ **{phase.phase_name}** (Fase Inicial)\n\n"
-        text += "📝 **Prompt:**\n{}\n\n".format(phase.phase_prompt)
-        text += "ℹ️ Todos os novos usuários começam nesta fase."
+        text += f"📝 **Preview:** `{preview_safe}`\n\n"
+        text += (
+            "Baixe o arquivo .txt para visualizar o prompt completo."
+            "\n\nℹ️ Todos os novos usuários começam nesta fase."
+        )
     else:
         text = f"📋 **{phase.phase_name}**\n\n"
         text += f"🔑 **Trigger:** `{phase.phase_trigger}`\n\n"
-        text += "📝 **Prompt:**\n{}\n\n".format(phase.phase_prompt)
+        text += f"📝 **Preview:** `{preview_safe}`\n\n"
         text += (
-            f"ℹ️ Quando a IA retornar `{phase.phase_trigger}`, esta fase será ativada."
+            f"Quando a IA retornar `{phase.phase_trigger}`, esta fase será ativada. "
+            "Baixe o .txt para ler o prompt completo."
         )
 
     # Botões de ação
@@ -180,6 +205,26 @@ async def handle_view_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
     buttons.append(
         [
             {
+                "text": "✏️ Editar Prompt",
+                "callback_data": f"ai_phase_edit:{phase.id}",
+            }
+        ]
+    )
+    buttons.append(
+        [
+            {
+                "text": "⬆️ Enviar .txt",
+                "callback_data": f"ai_phase_upload:{phase.id}",
+            },
+            {
+                "text": "⬇️ Baixar .txt",
+                "callback_data": f"ai_phase_download:{phase.id}",
+            },
+        ]
+    )
+    buttons.append(
+        [
+            {
                 "text": "🗑 Excluir Fase",
                 "callback_data": f"ai_confirm_delete:{phase.id}",
             }
@@ -190,6 +235,38 @@ async def handle_view_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
     )
 
     return {"text": text, "keyboard": {"inline_keyboard": buttons}}
+
+
+async def handle_phase_download(user_id: int, phase_id: int) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    phase = await AIPhaseService.get_phase_by_id(phase_id)
+
+    if not phase:
+        return {"text": "❌ Fase não encontrada.", "keyboard": None}
+
+    prompt = phase.phase_prompt or ""
+
+    if not prompt.strip():
+        return {"text": "⚠️ Este prompt ainda não foi configurado.", "keyboard": None}
+
+    filename = _phase_filename(phase.phase_name, phase.id)
+    stream = make_txt_stream(filename, prompt)
+
+    api = TelegramAPI()
+    await api.send_document(
+        token=settings.MANAGER_BOT_TOKEN,
+        chat_id=user_id,
+        document=stream,
+        caption=f"📄 Prompt da fase {phase.phase_name}.",
+    )
+
+    view = await handle_view_phase(user_id, phase_id)
+    view["text"] = (
+        "📄 Prompt enviado como .txt. Confira o arquivo acima.\n\n" + view["text"]
+    )
+    return view
 
 
 async def handle_set_initial_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
@@ -264,3 +341,86 @@ async def handle_delete_phase(user_id: int, phase_id: int) -> Dict[str, Any]:
         return await handle_list_phases(user_id, bot_id)
     else:
         return {"text": "❌ Erro ao excluir fase.", "keyboard": None}
+
+
+async def handle_phase_edit_prompt(user_id: int, phase_id: int) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    phase = await AIPhaseService.get_phase_by_id(phase_id)
+    if not phase:
+        return {"text": "❌ Fase não encontrada.", "keyboard": None}
+
+    ConversationStateManager.set_state(
+        user_id,
+        "awaiting_phase_prompt_update",
+        {"phase_id": phase_id},
+    )
+
+    return {
+        "text": (
+            f"✏️ Envie o novo prompt para a fase `{phase.phase_name}`.\n\n"
+            "Para textos maiores que 4096 caracteres, prefira enviar um arquivo .txt "
+            "com o botão de upload."
+        ),
+        "keyboard": None,
+    }
+
+
+async def handle_phase_upload_request(user_id: int, phase_id: int) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    phase = await AIPhaseService.get_phase_by_id(phase_id)
+    if not phase:
+        return {"text": "❌ Fase não encontrada.", "keyboard": None}
+
+    ConversationStateManager.set_state(
+        user_id,
+        "awaiting_phase_prompt_file",
+        {"phase_id": phase_id},
+    )
+
+    return {
+        "text": (
+            f"📂 Envie o arquivo .txt com o prompt para `{phase.phase_name}`.\n"
+            "Tamanho máximo aceito: 64 KB."
+        ),
+        "keyboard": None,
+    }
+
+
+async def handle_phase_prompt_update_input(
+    user_id: int, phase_id: int, prompt: str
+) -> Dict[str, Any]:
+    return await _persist_phase_prompt_update(user_id, phase_id, prompt)
+
+
+async def handle_phase_prompt_document_input(
+    user_id: int, phase_id: int, document: Dict[str, Any], token: str
+) -> Dict[str, Any]:
+    try:
+        prompt = await download_txt_document(token, document)
+    except TxtFileError as exc:
+        return {"text": f"❌ {exc}", "keyboard": None}
+
+    return await _persist_phase_prompt_update(user_id, phase_id, prompt)
+
+
+async def _persist_phase_prompt_update(
+    user_id: int, phase_id: int, prompt: str
+) -> Dict[str, Any]:
+    success = await AIPhaseService.update_phase(phase_id, prompt=prompt)
+
+    if not success:
+        return {"text": "❌ Não foi possível atualizar a fase.", "keyboard": None}
+
+    ConversationStateManager.clear_state(user_id)
+
+    char_count = len(prompt)
+    view = await handle_view_phase(user_id, phase_id)
+    view["text"] = (
+        f"✅ Prompt da fase atualizado! ({char_count} caracteres).\n"
+        "Preview e opções abaixo.\n\n" + view["text"]
+    )
+    return view

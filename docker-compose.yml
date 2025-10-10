@@ -21,7 +21,7 @@ services:
 
   worker:
     build: .
-    command: celery -A workers.celery_app worker -Q celery,recovery --concurrency=10 -l info
+    command: celery -A workers.celery_app worker -Q celery,recovery,audio --concurrency=10 -l info
     env_file: .env
     environment:
       - DB_URL=postgresql+psycopg://admin:senha_segura@postgres:5432/telegram_bots

@@ -30,6 +30,7 @@ repos:
     rev: 7.1.1
     hooks:
       - id: flake8
+        language_version: python3.11
         args: [
           '--max-line-length=88',
           '--extend-ignore=E203,W503',
@@ -40,6 +41,7 @@ repos:
     rev: v1.13.0
     hooks:
       - id: mypy
+        language_version: python3.11
         additional_dependencies: [
           'pydantic>=2.0',
           'types-requests',
@@ -67,6 +69,6 @@ repos:
         exclude: ^tests/
 
 default_language_version:
-  python: python3
+  python: python3.11
 
 fail_fast: false

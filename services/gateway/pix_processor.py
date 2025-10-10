@@ -32,7 +32,11 @@ class PixProcessor:
 
     @staticmethod
     async def process_block_with_pix(
-        text: str, offer_id: int, bot_id: int, chat_id: int, user_telegram_id: int
+        text: str,
+        offer_id: int,
+        bot_id: int,
+        chat_id: int,
+        user_telegram_id: int,
     ) -> Tuple[str, Optional[any]]:
         """
         Processa texto com tag {pix}, substituindo por chave gerada
@@ -53,7 +57,10 @@ class PixProcessor:
         try:
             # Gera PIX
             transaction = await PixProcessor.generate_pix_for_offer(
-                offer_id, bot_id, user_telegram_id, chat_id
+                offer_id=offer_id,
+                bot_id=bot_id,
+                user_telegram_id=user_telegram_id,
+                chat_id=chat_id,
             )
 
             if not transaction:
@@ -100,7 +107,11 @@ class PixProcessor:
 
     @staticmethod
     async def generate_pix_for_offer(
-        offer_id: int, bot_id: int, user_telegram_id: int, chat_id: int
+        offer_id: int,
+        bot_id: int,
+        user_telegram_id: int,
+        chat_id: int,
+        value_cents: Optional[int] = None,
     ):
         """
         Gera PIX para uma oferta
@@ -116,15 +127,22 @@ class PixProcessor:
         """
         # Busca oferta
         offer = await OfferRepository.get_offer_by_id(offer_id)
-        if not offer or not offer.value:
+        if not offer:
             logger.warning(
-                "Offer not found or has no value",
+                "Offer not found",
                 extra={"offer_id": offer_id},
             )
             return None
 
-        # Converte valor para centavos
-        value_cents = PixProcessor.extract_value_in_cents(offer.value)
+        if value_cents is None:
+            if not offer.value:
+                logger.warning(
+                    "Offer has no base value",
+                    extra={"offer_id": offer_id},
+                )
+                return None
+            value_cents = PixProcessor.extract_value_in_cents(offer.value)
+
         if value_cents < 50:
             logger.warning(
                 "Offer value below minimum",

@@ -52,6 +52,35 @@ from .deliverable_handlers import (
     handle_offer_deliverable_menu,
 )
 
+# Discount block handlers
+from .discount_block_handlers import (
+    handle_discount_block_autodel_click,
+    handle_discount_block_delay_click,
+    handle_discount_block_delete,
+    handle_discount_block_effects_click,
+    handle_discount_block_media_click,
+    handle_discount_block_text_click,
+    handle_discount_block_view,
+)
+from .discount_block_inputs import (
+    handle_discount_block_autodel_input,
+    handle_discount_block_delay_input,
+    handle_discount_block_media_input,
+    handle_discount_block_text_input,
+)
+
+# Discount menu handlers
+from .discount_menu_handlers import (
+    build_discount_menu_token,
+    get_discount_token_action,
+    handle_discount_block_create,
+    handle_discount_menu,
+    handle_discount_menu_from_token,
+    handle_discount_preview,
+    handle_discount_trigger_input,
+    handle_discount_trigger_prompt,
+)
+
 # Edit handlers
 from .edit_handlers import (
     handle_offer_edit_menu,
@@ -158,6 +187,27 @@ __all__ = [
     "handle_deliverable_block_delay_input",
     "handle_deliverable_block_autodel_click",
     "handle_deliverable_block_autodel_input",
+    # Discount menu handlers
+    "handle_discount_menu",
+    "handle_discount_menu_from_token",
+    "handle_discount_trigger_prompt",
+    "handle_discount_trigger_input",
+    "handle_discount_block_create",
+    "handle_discount_preview",
+    "get_discount_token_action",
+    "build_discount_menu_token",
+    # Discount block handlers
+    "handle_discount_block_view",
+    "handle_discount_block_text_click",
+    "handle_discount_block_text_input",
+    "handle_discount_block_media_click",
+    "handle_discount_block_media_input",
+    "handle_discount_block_effects_click",
+    "handle_discount_block_delay_click",
+    "handle_discount_block_delay_input",
+    "handle_discount_block_autodel_click",
+    "handle_discount_block_autodel_input",
+    "handle_discount_block_delete",
     # Manual verification menu handlers
     "handle_manual_verification_menu",
     "handle_set_verification_trigger",

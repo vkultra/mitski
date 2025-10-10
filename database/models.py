@@ -93,7 +93,7 @@ class BotAIConfig(Base):
     model_type = Column(
         String(32), default="reasoning"
     )  # 'reasoning' ou 'non-reasoning'
-    general_prompt = Column(String(4096))  # Comportamento geral da IA
+    general_prompt = Column(Text)  # Comportamento geral da IA
     temperature = Column(String(8), default="0.7")
     max_tokens = Column(Integer, default=2000)
     is_enabled = Column(Boolean, default=True)
@@ -112,7 +112,7 @@ class AIPhase(Base):
     phase_trigger = Column(
         String(32), nullable=True
     )  # Termo único (ex: "fcf4", "eko3") - NULL para fase inicial
-    phase_prompt = Column(String(4096), nullable=False)  # Prompt da fase
+    phase_prompt = Column(Text, nullable=False)  # Prompt da fase
     is_initial = Column(Boolean, default=False)  # Se é a fase inicial (sem trigger)
     order = Column(Integer, default=0)
     created_at = Column(DateTime, server_default=func.now())
@@ -175,6 +175,7 @@ class Offer(Base):
     value = Column(String(32))  # Valor formatado (ex: "R$ 7,90")
     requires_manual_verification = Column(Boolean, default=False)  # Verificação manual
     manual_verification_trigger = Column(String(128))  # Termo que aciona verificação
+    discount_trigger = Column(String(128))  # Termo que aciona desconto dinâmico
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
@@ -395,6 +396,12 @@ class PixTransaction(Base):
     upsell_id = Column(
         Integer, ForeignKey("upsells.id", ondelete="CASCADE"), nullable=True
     )
+    tracker_id = Column(
+        Integer,
+        ForeignKey("tracker_links.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Dados da transação PushinPay
     transaction_id = Column(String(128), nullable=False, unique=True)
@@ -467,6 +474,39 @@ class OfferManualVerificationBlock(Base):
     __table_args__ = (
         Index("idx_manual_verification_blocks_order", "offer_id", "order"),
     )
+
+
+# Importa modelos de rastreio para registro na metadata sem criar ciclos
+from .tracking_models import (  # noqa: E402  # isort: skip
+    BotTrackingConfig,
+    TrackerAttribution,
+    TrackerDailyStat,
+    TrackerLink,
+)
+
+
+class OfferDiscountBlock(Base):
+    """Blocos de mensagem para respostas de desconto"""
+
+    __tablename__ = "offer_discount_blocks"
+
+    id = Column(Integer, primary_key=True)
+    offer_id = Column(
+        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
+    )
+    order = Column(Integer, nullable=False)
+
+    text = Column(String(4096))
+    media_file_id = Column(String(256))
+    media_type = Column(String(32))
+
+    delay_seconds = Column(Integer, default=0)
+    auto_delete_seconds = Column(Integer, default=0)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_discount_blocks_order", "offer_id", "order"),)
 
 
 class MediaFileCache(Base):
@@ -709,7 +749,7 @@ class UpsellPhaseConfig(Base):
         unique=True,
         nullable=False,
     )
-    phase_prompt = Column(String(4096), nullable=False)  # Prompt da fase
+    phase_prompt = Column(Text, nullable=False)  # Prompt da fase
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
@@ -902,8 +942,33 @@ class MirrorGlobalConfig(Base):
     __table_args__ = (Index("idx_global_admin", "admin_id", unique=True),)
 
 
+class AudioPreference(Base):
+    """Preferências de processamento de áudio por administrador do bot gerenciador"""
+
+    __tablename__ = "audio_preferences"
+
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(BigInteger, unique=True, nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="default")  # default | whisper
+    default_reply = Column(
+        String(1024),
+        nullable=False,
+        default="Recebemos seu áudio. Em breve entraremos em contato.",
+    )
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (Index("idx_audio_pref_admin", "admin_id", unique=True),)
+
+
 def _register_extra_models() -> None:
     from . import stats_models  # noqa: F401
+    from .tracking_models import (  # noqa: F401
+        BotTrackingConfig,
+        TrackerAttribution,
+        TrackerDailyStat,
+        TrackerLink,
+    )
 
 
 _register_extra_models()

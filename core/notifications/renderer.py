@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from html import escape
 from typing import Optional
 
@@ -48,13 +48,15 @@ def render_sale_message(data: SaleMessageData) -> str:
     amount_text = escape(_format_currency(data.amount_cents, data.currency))
     buyer_username = _format_username(data.buyer_username)
     buyer_id = (
-        str(data.buyer_user_id)
-        if data.buyer_user_id is not None
-        else "não informado"
+        str(data.buyer_user_id) if data.buyer_user_id is not None else "não informado"
     )
     bot_username = data.bot_username or "Bot sem username"
 
-    bot_display = f"@{escape(bot_username.lstrip('@'))}" if bot_username.startswith("@") else escape(bot_username)
+    bot_display = (
+        f"@{escape(bot_username.lstrip('@'))}"
+        if bot_username.startswith("@")
+        else escape(bot_username)
+    )
 
     lines = ["🎉 <b>Venda Aprovada!</b>"]
     if data.is_upsell:

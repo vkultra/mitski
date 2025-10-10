@@ -232,6 +232,26 @@ Configure sua oferta:
 - Blocos listados abaixo
 - Botão "Criar Bloco" sempre acima de "Pré-visualizar"
 
+### 4. Descontos negociados
+
+Permite responder automaticamente quando a IA fecha um valor diferente do preço padrão.
+
+**Fluxo**:
+1. Configure o `Termo` (ex.: `fechoupack`).
+2. Crie blocos personalizados (mesmo editor de Pitch/Entregável) e inclua `{pix}` onde a chave PIX deve aparecer.
+3. Quando a IA enviar `{termo}{valor}` — case-insensitive e mesmo colado em outras palavras, como `testefechoupack15` ou `FECHOUPACK 19,90` — o sistema:
+   - Gera um PIX com o valor negociado (aceita R$ 0,50 até R$ 10.000,00).
+   - Substitui a mensagem da IA pelos blocos de Descontos.
+   - Agenda a verificação automática de pagamento.
+   - Entrega o mesmo entregável da oferta assim que o pagamento for confirmado (automático ou manual).
+
+**Boas práticas**:
+- O status do botão fica ✅ quando há termo configurado **e** pelo menos um bloco criado.
+- Em pré-visualizações, `{pix}` é substituído por `PREVIEW_PIX_CODE` para evitar gerar transações reais.
+- Se nenhum bloco contiver `{pix}`, a mensagem será enviada sem a chave (o administrador deve lembrar-se de incluí-la).
+- As transações de descontos aparecem normalmente na verificação automática e manual, pois ficam vinculadas ao `offer_id` original.
+- Para testes rápidos, o administrador do bot pode enviar `/{termo}{valor}` (ex.: `/fechoupack15`) no bot secundário; o fluxo gera uma chave PIX real e envia os blocos de desconto como se fosse a IA.
+
 ## Configuração de Blocos
 
 ### Propriedades Comuns

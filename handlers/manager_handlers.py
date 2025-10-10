@@ -2,62 +2,203 @@
 Handlers para comandos do bot gerenciador
 """
 
+import os
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from core.config import settings
 from core.telemetry import logger
+from database.credits_repos import CreditWalletRepository
 from handlers.recovery.callbacks import build_callback
 from services.bot_registration import BotRegistrationService
 from services.conversation_state import ConversationStateManager
+from services.credits.analytics import message_token_stats, sum_ledger_amount
+from services.credits.credit_service import is_unlimited_admin
+from services.stats.formatters import format_brl
+from services.stats.service import StatsService
+
+
+def _escape_mdv2(text: str) -> str:
+    """Escapes Telegram MarkdownV2 special chars (keep it minimal and local)."""
+    if not text:
+        return ""
+    specials = r"_[]()~`>#+-=|{}.!*"
+    out = []
+    for ch in text:
+        if ch in specials:
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _load_ascii_block() -> list[str]:
+    """Load ASCII header from inicialmenu.txt; fallback to embedded lines.
+
+    Only the top ASCII art (including the line with v1.0) is used.
+    """
+    # Try to locate repo root relative to this file
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    path = os.path.join(root, "inicialmenu.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [ln.rstrip("\n") for ln in f.readlines()]
+        # Skip leading blanks
+        start = 0
+        while start < len(lines) and not lines[start].strip():
+            start += 1
+        # Collect until a blank line after ASCII block
+        block: list[str] = []
+        for ln in lines[start:]:
+            if not ln.strip():
+                break
+            block.append(ln)
+        # Ensure we only keep up to the line containing v1.0 (inclusive) if present
+        for idx, ln in enumerate(block):
+            if "v1.0" in ln:
+                return block[: idx + 1]
+        return block
+    except Exception:
+        # Fallback: embedded copy (kept short and exact)
+        return [
+            "▗▖ ▗▖▗▄▗▄▄▄▗▄▄▄▗▄▄▄▖▗▄▖",
+            "▐▌ ▐▐▌ ▐▌█   █   █ ▐▌ ▐▌",
+            "▐▛▀▜▐▌ ▐▌█   █   █ ▐▛▀▜▌",
+            "▐▌ ▐▝▚▄▞▘█   █ ▗▄█▄▐▌ ▐▌ v1.0",
+        ]
+
+
+def _load_footer_quote() -> str:
+    """Load the final paragraph from inicialmenu.txt (quoted in output)."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    path = os.path.join(root, "inicialmenu.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [ln.rstrip("\n") for ln in f.readlines()]
+        # Take the last non-empty line as footer
+        for ln in reversed(lines):
+            if ln.strip():
+                return ln.strip()
+        return "Navegue usando os botões abaixo."
+    except Exception:
+        return (
+            "Navegue usando os botões abaixo. Pensou em uma organização melhor para os menus "
+            "ou novas funções ou está perdido ou rolou algum BUG? Sim? Para qualquer uma dessas "
+            "coisas me chame imediatamente no PV."
+        )
+
+
+def _today_bounds() -> tuple[datetime, datetime]:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_today = start_today + timedelta(days=1)
+    return start_today, end_today
+
+
+def _build_start_message(user_id: int) -> tuple[str, str]:
+    """Builds the /start message with MarkdownV2 quoting and user metrics."""
+    # Admin unlimited flag and wallet balance
+    unlimited = is_unlimited_admin(user_id)
+    balance_cents = CreditWalletRepository.get_balance_cents_sync(user_id)
+    balance_text = "♾️ Admin (ilimitado)" if unlimited else format_brl(balance_cents)
+
+    # Credits usage today (consistent with Credits menu)
+    start_today, end_today = _today_bounds()
+    messages_today, tokens_today = message_token_stats(user_id, start_today, end_today)
+    today_spent_cents = sum_ledger_amount(
+        user_id, "debit", start_today, end_today, None
+    )
+
+    # If unlimited admin, display zero in "Uso Hoje" as requested
+    if unlimited:
+        tokens_today = 0
+        today_spent_cents = 0
+
+    tokens_display = f"{tokens_today:,}".replace(",", ".")
+
+    # Sales today (consistent with Estatísticas menu)
+    svc = StatsService(user_id)
+    summary = svc.load_summary(svc.build_window(day=date.today()))
+    sales_count = int(getattr(summary.totals, "sales_count", 0) or 0)
+    gross_cents = int(getattr(summary.totals, "gross_cents", 0) or 0)
+
+    # Compose message parts with MarkdownV2 escaping
+    ascii_lines = _load_ascii_block()
+    ascii_quote = "\n".join(["> " + _escape_mdv2(line) for line in ascii_lines])
+
+    sep = _escape_mdv2("➖➖➖➖➖➖➖➖➖")
+
+    lines = [
+        ascii_quote,
+        "",
+        sep,
+        _escape_mdv2(f"🔴 Créditos Atuais: {balance_text}"),
+        _escape_mdv2(
+            f"💰 Vendas Totais (hoje): {sales_count} | {format_brl(gross_cents)}"
+        ),
+        _escape_mdv2(f"✉️ Mensagens Hoje: {messages_today}"),
+        _escape_mdv2(
+            f"🧮 Uso Hoje: {tokens_display} tokens | {format_brl(today_spent_cents)}"
+        ),
+        "",
+        "> " + _escape_mdv2(_load_footer_quote()),
+    ]
+
+    text = "\n".join(lines)
+    return text, "MarkdownV2"
 
 
 async def handle_start(user_id: int) -> Dict[str, Any]:
     """Handler para comando /start - retorna mensagem e teclado"""
-    notifications_row = [[{"text": "🔔 Notificações", "callback_data": "notifications_menu"}]]
+    ConversationStateManager.clear_state(user_id)
+
+    notifications_row = [
+        [{"text": "🔔 Notificações", "callback_data": "notifications_menu"}]
+    ]
+
+    start_text, parse_mode = _build_start_message(user_id)
 
     if user_id not in settings.allowed_admin_ids_list:
-        text = (
-            "👋 Bem-vindo!\n\n"
-            "Use o botão abaixo para configurar o canal onde deseja receber as notificações de vendas aprovadas."
-        )
-        return {"text": text, "keyboard": {"inline_keyboard": notifications_row}}
+        keyboard = {
+            "inline_keyboard": notifications_row
+            + [[{"text": "📈 Estatísticas", "callback_data": "stats_menu"}]]
+            + [[{"text": "🧭 Rastreio", "callback_data": "tracking_menu"}]]
+            + [[{"text": "🤖 IA", "callback_data": "ai_menu"}]]
+            + [[{"text": "💳 Créditos", "callback_data": "credits_menu"}]],
+        }
+        return {"text": start_text, "keyboard": keyboard, "parse_mode": parse_mode}
 
     keyboard = {
-        "inline_keyboard": notifications_row
-        + [
-            [{"text": "➕ Adicionar Bot", "callback_data": "add_bot"}]],
-    }
-
-    keyboard["inline_keyboard"].extend(
-        [
+        "inline_keyboard": [
+            [{"text": "➕ Adicionar Perfil", "callback_data": "add_bot"}],
             [
-                {"text": "🤖 IA", "callback_data": "ai_menu"},
-                {"text": "💳 Gateway", "callback_data": "gateway_menu"},
+                {"text": "🧠 Controle", "callback_data": "ai_menu"},
+                {"text": "📈 Estatísticas", "callback_data": "stats_menu"},
+                {"text": "💳 Créditos", "callback_data": "credits_menu"},
+            ],
+            [
+                {"text": "⏸️ Pausar", "callback_data": "pause_menu"},
+                {"text": "🧭 Rastreio", "callback_data": "tracking_menu"},
+            ],
+            [
+                {"text": "🔔 Notificações", "callback_data": "notifications_menu"},
+                {"text": "🏦 Gateway", "callback_data": "gateway_menu"},
             ],
             [
                 {
                     "text": "🔁 Recuperação",
                     "callback_data": build_callback("menu", page=1),
-                }
-            ],
-            [
+                },
                 {"text": "🛡️ ANTISPAM", "callback_data": "antispam_menu"},
-                {"text": "🪞 Grupo", "callback_data": "group_menu"},
             ],
             [
-                {"text": "⏸️ Pausar", "callback_data": "pause_menu"},
-                {"text": "📋 Listar Bots", "callback_data": "list_bots"},
-            ],
-            [
+                {"text": "👥 Grupo", "callback_data": "group_menu"},
                 {"text": "🗑 Desativar", "callback_data": "deactivate_menu"},
             ],
         ]
-    )
-
-    return {
-        "text": "👋 Bem-vindo ao Telegram Multi-Bot Manager!\n\nEscolha uma opção abaixo:",
-        "keyboard": keyboard,
     }
+
+    return {"text": start_text, "keyboard": keyboard, "parse_mode": parse_mode}
 
 
 async def handle_text_input(user_id: int, text: str) -> Optional[Dict[str, Any]]:
@@ -85,6 +226,31 @@ async def handle_text_input(user_id: int, text: str) -> Optional[Dict[str, Any]]
         from handlers.notifications.manager_menu import handle_notifications_text_input
 
         return await handle_notifications_text_input(user_id, text, state_data)
+
+    if state == "awaiting_audio_default_reply":
+        from handlers.ai.audio_menu_handlers import handle_audio_menu
+        from services.audio import AudioPreferenceError, AudioPreferencesService
+
+        bot_id = data.get("bot_id")
+        try:
+            AudioPreferencesService.set_default_reply(user_id, text)
+            ConversationStateManager.clear_state(user_id)
+        except AudioPreferenceError as exc:
+            ConversationStateManager.clear_state(user_id)
+            return {"text": f"❌ {str(exc)}", "keyboard": None}
+
+        if bot_id:
+            response = await handle_audio_menu(
+                user_id, bot_id, highlight="✅ Resposta padrão atualizada!"
+            )
+            return response
+
+        return {"text": "✅ Resposta padrão atualizada!", "keyboard": None}
+
+    if state and state.startswith("tracking:"):
+        from handlers.tracking.menu import handle_tracking_text_input
+
+        return await handle_tracking_text_input(user_id, text, state_data)
 
     if user_id not in settings.allowed_admin_ids_list:
         return None
@@ -266,34 +432,143 @@ async def handle_callback_deactivate_menu(user_id: int) -> Dict[str, Any]:
     try:
         bots = await BotRegistrationService.list_bots(user_id)
         if not bots:
-            return {"text": "📭 Você não tem bots para desativar.", "keyboard": None}
+            return {"text": "📭 Você não tem bots para gerenciar.", "keyboard": None}
 
-        # Criar botões inline para cada bot
         buttons = []
         for bot in bots:
-            if bot.is_active:
-                display = (
-                    f"{bot.display_name} (@{bot.username})"
-                    if bot.display_name
-                    else f"@{bot.username}"
-                )
-                buttons.append(
-                    [{"text": f"🗑 {display}", "callback_data": f"deactivate:{bot.id}"}]
-                )
+            display = (
+                f"{bot.display_name} (@{bot.username})"
+                if bot.display_name
+                else f"@{bot.username}"
+            )
 
-        if not buttons:
-            return {
-                "text": "📭 Você não tem bots ativos para desativar.",
-                "keyboard": None,
-            }
+            if bot.is_active:
+                left_button = {
+                    "text": f"⏸️ {display}",
+                    "callback_data": f"deactivate:{bot.id}",
+                }
+            else:
+                left_button = {
+                    "text": f"✅ {display}",
+                    "callback_data": "noop",
+                }
+
+            buttons.append(
+                [
+                    left_button,
+                    {
+                        "text": "🗑 Excluir",
+                        "callback_data": f"delete_confirm:{bot.id}",
+                    },
+                ]
+            )
+
+        buttons.append([{"text": "🔙 Voltar", "callback_data": "back_to_main"}])
 
         keyboard = {"inline_keyboard": buttons}
-        return {"text": "🗑 Escolha um bot para desativar:", "keyboard": keyboard}
+        return {
+            "text": "🗑 *Desativar ou excluir bots*\n\nEscolha o bot desejado:",
+            "keyboard": keyboard,
+            "parse_mode": "Markdown",
+        }
     except Exception as e:
         logger.error(
             "Deactivate menu failed", extra={"user_id": user_id, "error": str(e)}
         )
         return {"text": f"❌ Erro ao carregar menu: {str(e)}", "keyboard": None}
+
+
+async def handle_callback_delete_confirm(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Confirmação antes de excluir definitivamente um bot."""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        bots = await BotRegistrationService.list_bots(user_id)
+        bot = next((b for b in bots if b.id == bot_id), None)
+        if not bot:
+            return {
+                "text": "❌ Bot não encontrado.",
+                "keyboard": {
+                    "inline_keyboard": [
+                        [{"text": "🔙 Voltar", "callback_data": "deactivate_menu"}]
+                    ]
+                },
+            }
+
+        display = (
+            f"{bot.display_name} (@{bot.username})"
+            if bot.display_name
+            else f"@{bot.username}"
+        )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "❌ Cancelar", "callback_data": "deactivate_menu"},
+                    {"text": "🗑 Excluir", "callback_data": f"delete_bot:{bot_id}"},
+                ]
+            ]
+        }
+
+        text = (
+            "⚠️ Excluir bot\n\n"
+            f"Tem certeza que deseja remover {display}?\n"
+            "Todos os dados associados (histórico, ofertas, rastreios, etc.) serão apagados."
+        )
+        return {"text": text, "keyboard": keyboard}
+    except Exception as e:
+        logger.error(
+            "Delete confirm failed",
+            extra={"user_id": user_id, "bot_id": bot_id, "error": str(e)},
+        )
+        return {"text": f"❌ Erro ao carregar confirmação: {str(e)}", "keyboard": None}
+
+
+async def handle_callback_delete_bot(user_id: int, bot_id: int) -> Dict[str, Any]:
+    """Exclui definitivamente um bot e dados relacionados."""
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    try:
+        success = await BotRegistrationService.delete_bot(user_id, bot_id)
+        if success:
+            response = await handle_callback_deactivate_menu(user_id)
+            response["text"] = "🗑 Bot excluído com sucesso!\n\n" + response.get(
+                "text", "Selecione outro bot."
+            )
+            return response
+
+        return {
+            "text": "❌ Bot não encontrado ou já removido.",
+            "keyboard": {
+                "inline_keyboard": [
+                    [{"text": "🔙 Voltar", "callback_data": "deactivate_menu"}]
+                ]
+            },
+        }
+    except ValueError as exc:
+        return {
+            "text": f"❌ {str(exc)}",
+            "keyboard": {
+                "inline_keyboard": [
+                    [{"text": "🔙 Voltar", "callback_data": "deactivate_menu"}]
+                ]
+            },
+        }
+    except Exception as exc:  # pragma: no cover - proteção extra
+        logger.error(
+            "Delete bot failed",
+            extra={"user_id": user_id, "bot_id": bot_id, "error": str(exc)},
+        )
+        return {
+            "text": "❌ Erro inesperado ao excluir bot. Tente novamente.",
+            "keyboard": {
+                "inline_keyboard": [
+                    [{"text": "🔙 Voltar", "callback_data": "deactivate_menu"}]
+                ]
+            },
+        }
 
 
 async def handle_pause_menu(user_id: int) -> Dict[str, Any]:

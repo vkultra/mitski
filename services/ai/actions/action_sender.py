@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 
 from core.telemetry import logger
 from database.repos import AIActionBlockRepository, MediaFileCacheRepository
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from workers.api_clients import TelegramAPI
 
 
@@ -51,7 +52,10 @@ class ActionSenderService:
 
         for block in blocks:
             # Determina tipo de mídia para efeito apropriado
-            media_type = block.media_type if block.media_file_id else None
+            source_media_type = block.media_type if block.media_file_id else None
+            media_type = (
+                normalize_media_type(source_media_type) if source_media_type else None
+            )
 
             # Aplica efeito de digitação antes de enviar
             if not preview_mode:
@@ -88,6 +92,7 @@ class ActionSenderService:
                 cached = await MediaFileCacheRepository.get_cached_file_id(
                     original_file_id=block.media_file_id,
                     bot_id=bot_id,
+                    expected_media_type=media_type,
                 )
 
                 if cached:
@@ -97,11 +102,26 @@ class ActionSenderService:
                     # Fazer streaming da mídia e enviar
                     media_file_id, stream_result = await self._stream_media_to_bot(
                         block.media_file_id,
-                        block.media_type,
+                        media_type,
                         bot_id,
                         chat_id,
                         text,
+                        source_media_type=source_media_type,
                     )
+                    if (
+                        media_type == "voice"
+                        and media_file_id is None
+                        and stream_result is None
+                    ):
+                        logger.error(
+                            "Voice media unavailable after conversion",
+                            extra={
+                                "block_id": block.id,
+                                "bot_id": bot_id,
+                                "chat_id": chat_id,
+                            },
+                        )
+                        continue
 
                     # Se já enviou via stream, usar o resultado
                     if stream_result:
@@ -171,11 +191,11 @@ class ActionSenderService:
                 caption=caption,
                 parse_mode="HTML",
             )
-        elif media_type == "audio":
-            return await self.api.send_audio(
+        elif media_type == "voice":
+            return await self.api.send_voice(
                 token=self.bot_token,
                 chat_id=chat_id,
-                audio=file_id,
+                voice=file_id,
                 caption=caption,
                 parse_mode="HTML",
             )
@@ -204,6 +224,7 @@ class ActionSenderService:
         bot_id: int,
         chat_id: int,
         caption: str = "",
+        source_media_type: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[dict]]:
         """
         Faz streaming de mídia do bot gerenciador para bot secundário
@@ -217,12 +238,23 @@ class ActionSenderService:
         from services.media_stream import MediaStreamService
 
         # Obter file_id do cache ou stream
-        cached_file_id, stream = await MediaStreamService.get_or_stream_media(
-            original_file_id=original_file_id,
-            bot_id=bot_id,
-            media_type=media_type,
-            manager_bot_token=settings.MANAGER_BOT_TOKEN,
-        )
+        try:
+            cached_file_id, stream = await MediaStreamService.get_or_stream_media(
+                original_file_id=original_file_id,
+                bot_id=bot_id,
+                media_type=media_type,
+                manager_bot_token=settings.MANAGER_BOT_TOKEN,
+                source_media_type=source_media_type,
+            )
+        except VoiceConversionError:
+            logger.error(
+                "Voice conversion failed for action block",
+                extra={
+                    "original_file_id": original_file_id,
+                    "bot_id": bot_id,
+                },
+            )
+            return None, None
 
         # Se já está no cache, retornar sem enviar
         if cached_file_id:
@@ -291,11 +323,11 @@ class ActionSenderService:
                     caption=caption,
                     parse_mode="HTML",
                 )
-            elif media_type == "audio":
-                return await self.api.send_audio(
+            elif media_type == "voice":
+                return await self.api.send_voice(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    audio=media_stream,  # BytesIO object
+                    voice=media_stream,  # BytesIO object
                     caption=caption,
                     parse_mode="HTML",
                 )
@@ -326,8 +358,8 @@ class ActionSenderService:
                     return photos[-1].get("file_id")
             elif media_type == "video" and "video" in result:
                 return result["video"].get("file_id")
-            elif media_type == "audio" and "audio" in result:
-                return result["audio"].get("file_id")
+            elif media_type == "voice" and "voice" in result:
+                return result["voice"].get("file_id")
             elif media_type == "document" and "document" in result:
                 return result["document"].get("file_id")
             elif media_type == "animation" and "animation" in result:

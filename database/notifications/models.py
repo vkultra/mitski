@@ -13,6 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+
 from database.models import Base
 
 
@@ -64,7 +65,9 @@ class SaleNotification(Base):
     buyer_username = Column(String(64))
     bot_username = Column(String(64))
     origin = Column(String(16), nullable=False)
-    status = Column(String(16), nullable=False, default="pending", server_default="pending")
+    status = Column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
     error = Column(Text)
     notified_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())

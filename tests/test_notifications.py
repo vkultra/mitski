@@ -37,7 +37,9 @@ def test_notification_settings_repository(db_session, sample_bot):
     assert fetched_scoped.id == scoped.id
 
     NotificationSettingsRepository.disable_sync(owner_id, sample_bot.id)
-    disabled = NotificationSettingsRepository.get_for_owner_sync(owner_id, sample_bot.id)
+    disabled = NotificationSettingsRepository.get_for_owner_sync(
+        owner_id, sample_bot.id
+    )
     assert disabled.enabled is False
 
 
@@ -92,8 +94,12 @@ def test_render_sale_message_formatting():
 def test_emit_sale_approved_enqueues(monkeypatch):
     calls: List[tuple[str, str]] = []
 
-    monkeypatch.setattr("services.sales.events.acquire_sale_lock", lambda *_, **__: True)
-    monkeypatch.setattr("services.sales.events.release_sale_lock", lambda *_, **__: None)
+    monkeypatch.setattr(
+        "services.sales.events.acquire_sale_lock", lambda *_, **__: True
+    )
+    monkeypatch.setattr(
+        "services.sales.events.release_sale_lock", lambda *_, **__: None
+    )
 
     class DummyTask:
         def delay(self, transaction_identifier: str, origin: str = "auto") -> None:
@@ -104,13 +110,18 @@ def test_emit_sale_approved_enqueues(monkeypatch):
         DummyTask(),
     )
     monkeypatch.setattr("services.sales.events.inc_enqueued", lambda *_: None)
-    monkeypatch.setattr("services.sales.events.settings", SimpleNamespace(ENABLE_SALE_NOTIFICATIONS=True))
+    monkeypatch.setattr(
+        "services.sales.events.settings",
+        SimpleNamespace(ENABLE_SALE_NOTIFICATIONS=True),
+    )
 
     assert emit_sale_approved("tx-abc", origin="manual") is True
     assert calls == [("tx-abc", "manual")]
 
     # Lock bloqueado → não enfileira novamente
-    monkeypatch.setattr("services.sales.events.acquire_sale_lock", lambda *_, **__: False)
+    monkeypatch.setattr(
+        "services.sales.events.acquire_sale_lock", lambda *_, **__: False
+    )
     assert emit_sale_approved("tx-abc", origin="manual") is False
     assert calls == [("tx-abc", "manual")]
 
@@ -148,7 +159,9 @@ async def test_handle_notifications_menu(monkeypatch, sample_bot):
 async def test_validate_and_save_channel(monkeypatch, db_session, sample_bot):
     from handlers.notifications.validation import validate_and_save_channel
 
-    monkeypatch.setattr("handlers.notifications.validation.settings.MANAGER_BOT_TOKEN", "123:token")
+    monkeypatch.setattr(
+        "handlers.notifications.validation.settings.MANAGER_BOT_TOKEN", "123:token"
+    )
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs):
@@ -158,7 +171,13 @@ async def test_validate_and_save_channel(monkeypatch, db_session, sample_bot):
             assert identifier == -1001
             return {"id": -1001, "type": "channel"}
 
-        def send_message(self, chat_id, text, parse_mode: str = "HTML", disable_web_page_preview: bool = True):
+        def send_message(
+            self,
+            chat_id,
+            text,
+            parse_mode: str = "HTML",
+            disable_web_page_preview: bool = True,
+        ):
             self.sent.append((chat_id, text))
             return {"ok": True}
 

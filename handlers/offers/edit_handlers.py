@@ -8,11 +8,14 @@ from core.config import settings
 from database.repos import (
     OfferDeliverableBlockRepository,
     OfferDeliverableRepository,
+    OfferDiscountBlockRepository,
     OfferManualVerificationBlockRepository,
     OfferPitchRepository,
     OfferRepository,
 )
 from services.conversation_state import ConversationStateManager
+
+from .discount_utils import build_menu_token, escape_markdown
 
 
 async def handle_offer_edit_menu(user_id: int, offer_id: int) -> Dict[str, Any]:
@@ -40,6 +43,8 @@ async def handle_offer_edit_menu(user_id: int, offer_id: int) -> Dict[str, Any]:
     has_manual_verification = (
         bool(offer.manual_verification_trigger) and len(manual_verification_blocks) > 0
     )
+    discount_blocks = await OfferDiscountBlockRepository.get_blocks_by_offer(offer_id)
+    has_discount = bool(offer.discount_trigger and len(discount_blocks) > 0)
 
     # Emojis de completude
     value_emoji = "✅ " if has_value else ""
@@ -47,6 +52,7 @@ async def handle_offer_edit_menu(user_id: int, offer_id: int) -> Dict[str, Any]:
     deliverable_emoji = "✅ " if has_deliverable else ""
     deliverable_blocks_emoji = "✅ " if has_deliverable_blocks else ""
     verification_emoji = "✅ " if has_manual_verification else ""
+    discount_emoji = "✅ " if has_discount else ""
 
     # Texto do botão Valor com valor entre parênteses
     value_button_text = f"{value_emoji}💰 Valor"
@@ -74,12 +80,16 @@ async def handle_offer_edit_menu(user_id: int, offer_id: int) -> Dict[str, Any]:
                     "callback_data": f"deliv_blocks:{offer_id}",
                 },
             ],
-            # Linha 4: Verificação Manual
+            # Linha 3: Descontos e Verificação Manual
             [
+                {
+                    "text": f"{discount_emoji}🏷️ Descontos",
+                    "callback_data": f"disc_m:{build_menu_token(user_id, offer_id)}",
+                },
                 {
                     "text": f"{verification_emoji}🔍 Verificação Manual",
                     "callback_data": f"manver_menu:{offer_id}",
-                }
+                },
             ],
             # Linha 5: Voltar e Salvar
             [
@@ -97,13 +107,26 @@ async def handle_offer_edit_menu(user_id: int, offer_id: int) -> Dict[str, Any]:
 
     value_text = f" ({offer.value})" if has_value else ""
 
+    display_offer_name = escape_markdown(offer.name)
+    manual_trigger_display = (
+        escape_markdown(offer.manual_verification_trigger)
+        if offer.manual_verification_trigger
+        else "Não definido"
+    )
+    discount_trigger_display = (
+        escape_markdown(offer.discount_trigger)
+        if offer.discount_trigger
+        else "Não definido"
+    )
+
     return {
-        "text": f"✏️ *Editando: {offer.name}{value_text}*\n\n"
+        "text": f"✏️ *Editando: {display_offer_name}{value_text}*\n\n"
         f"Configure sua oferta:\n\n"
         f"{'✅' if has_value else '⬜'} Valor definido\n"
         f"{'✅' if has_pitch else '⬜'} Pitch configurado ({len(pitch_blocks)} blocos)\n"
         f"{'✅' if has_deliverable_blocks else '⬜'} Entregável configurado ({len(deliverable_blocks)} blocos)\n"
-        f"{'✅' if has_manual_verification else '⬜'} Verificação manual configurada (Termo: {offer.manual_verification_trigger or 'Não definido'}, {len(manual_verification_blocks)} blocos)\n\n"
+        f"{'✅' if has_discount else '⬜'} Descontos configurados (Termo: {discount_trigger_display}, {len(discount_blocks)} blocos)\n"
+        f"{'✅' if has_manual_verification else '⬜'} Verificação manual configurada (Termo: {manual_trigger_display}, {len(manual_verification_blocks)} blocos)\n\n"
         f"Clique em SALVAR quando terminar.",
         "keyboard": keyboard,
     }

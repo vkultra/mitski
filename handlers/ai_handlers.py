@@ -2,19 +2,31 @@
 Handlers para configuração de IA
 """
 
+import re
 from typing import Any, Dict
 
 from core.config import settings
 from services.ai.config import AIConfigService
 from services.bot_registration import BotRegistrationService
 from services.conversation_state import ConversationStateManager
+from services.files import (
+    TxtFileError,
+    build_preview,
+    download_txt_document,
+    make_txt_stream,
+)
+from workers.api_clients import TelegramAPI
+
+
+def _slugify(value: str) -> str:
+    """Create a filesystem-friendly slug for filenames."""
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    return value.strip("_") or "prompt"
 
 
 async def handle_ai_menu_click(user_id: int) -> Dict[str, Any]:
     """Handler quando usuário clica no botão IA"""
-    if user_id not in settings.allowed_admin_ids_list:
-        return {"text": "⛔ Acesso negado.", "keyboard": None}
-
     return await handle_select_bot_for_ai(user_id, page=1)
 
 
@@ -65,10 +77,29 @@ async def handle_select_bot_for_ai(user_id: int, page: int = 1) -> Dict[str, Any
 
 async def handle_bot_selected_for_ai(user_id: int, bot_id: int) -> Dict[str, Any]:
     """Menu de configuração de IA do bot"""
-    if user_id not in settings.allowed_admin_ids_list:
-        return {"text": "⛔ Acesso negado.", "keyboard": None}
-
+    is_authorized = user_id in settings.allowed_admin_ids_list
     config = await AIConfigService.get_or_create_config(bot_id)
+
+    if not is_authorized:
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "⚡ Ações",
+                        "callback_data": f"action_menu:{bot_id}",
+                    }
+                ],
+                [{"text": "🔙 Voltar", "callback_data": "ai_menu"}],
+            ]
+        }
+
+        return {
+            "text": (
+                "⚙️ *Configurações disponíveis*\n\n"
+                "Você pode ajustar as respostas de áudio do bot usando o menu de Ações."
+            ),
+            "keyboard": keyboard,
+        }
 
     model_label = (
         "🧠 Reasoning" if config.model_type == "reasoning" else "⚡ Non-Reasoning"
@@ -119,28 +150,155 @@ async def handle_bot_selected_for_ai(user_id: int, bot_id: int) -> Dict[str, Any
 
 
 async def handle_general_prompt_click(user_id: int, bot_id: int) -> Dict[str, Any]:
+    return await handle_general_prompt_menu(user_id, bot_id)
+
+
+async def handle_general_prompt_menu(user_id: int, bot_id: int) -> Dict[str, Any]:
     """Solicita prompt de comportamento geral"""
     if user_id not in settings.allowed_admin_ids_list:
         return {"text": "⛔ Acesso negado.", "keyboard": None}
 
+    config = await AIConfigService.get_or_create_config(bot_id)
+    prompt = config.general_prompt or ""
+    preview = build_preview(prompt)
+    preview_safe = preview.replace("`", r"\`")
+    char_count = len(prompt)
+
+    return {
+        "text": (
+            "📝 *Comportamento Geral da IA*\n\n"
+            f"Caracteres salvos: *{char_count}*\n"
+            f"Preview: `{preview_safe}`\n\n"
+            "Se o prompt ultrapassar 4096 caracteres, envie um arquivo .txt usando o botão "
+            "de upload abaixo para evitar limites do Telegram."
+        ),
+        "keyboard": {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "✏️ Editar digitando",
+                        "callback_data": f"ai_general_edit:{bot_id}",
+                    }
+                ],
+                [
+                    {
+                        "text": "⬆️ Enviar .txt",
+                        "callback_data": f"ai_general_upload:{bot_id}",
+                    },
+                    {
+                        "text": "⬇️ Baixar .txt",
+                        "callback_data": f"ai_general_download:{bot_id}",
+                    },
+                ],
+                [{"text": "🔙 Voltar", "callback_data": f"ai_select_bot:{bot_id}"}],
+            ]
+        },
+    }
+
+
+async def handle_general_prompt_download(user_id: int, bot_id: int) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    config = await AIConfigService.get_or_create_config(bot_id)
+    prompt = config.general_prompt or ""
+
+    if not prompt.strip():
+        return {
+            "text": "⚠️ Nenhum prompt geral configurado ainda.",
+            "keyboard": None,
+        }
+
+    filename = f"prompt_geral_{bot_id}.txt"
+    stream = make_txt_stream(filename, prompt)
+
+    api = TelegramAPI()
+    await api.send_document(
+        token=settings.MANAGER_BOT_TOKEN,
+        chat_id=user_id,
+        document=stream,
+        caption="📄 Prompt geral exportado.",
+    )
+
+    menu = await handle_general_prompt_menu(user_id, bot_id)
+    menu["text"] = (
+        "📄 Prompt enviado como .txt. Confira o arquivo acima.\n\n" + menu["text"]
+    )
+    return menu
+
+
+async def handle_general_prompt_edit(user_id: int, bot_id: int) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
     ConversationStateManager.set_state(
-        user_id, "awaiting_general_prompt", {"bot_id": bot_id}
+        user_id,
+        "awaiting_general_prompt",
+        {"bot_id": bot_id},
     )
 
     return {
-        "text": '📝 *Comportamento Geral da IA*\n\nDigite o prompt que define como a IA deve se comportar:\n\nExemplo: "Você é um assistente de vendas educado. Sempre ofereça produtos relacionados."',
+        "text": (
+            "📝 Envie o novo comportamento geral digitando a mensagem aqui mesmo.\n\n"
+            "Se o texto for maior que 4096 caracteres, use o botão de upload de .txt "
+            "para evitar erros do Telegram."
+        ),
         "keyboard": None,
     }
+
+
+async def handle_general_prompt_upload_request(
+    user_id: int, bot_id: int
+) -> Dict[str, Any]:
+    if user_id not in settings.allowed_admin_ids_list:
+        return {"text": "⛔ Acesso negado.", "keyboard": None}
+
+    ConversationStateManager.set_state(
+        user_id,
+        "awaiting_general_prompt_file",
+        {"bot_id": bot_id},
+    )
+
+    return {
+        "text": (
+            "📂 Envie o arquivo .txt com o prompt completo como documento.\n"
+            "Tamanho máximo aceito: 64 KB."
+        ),
+        "keyboard": None,
+    }
+
+
+async def handle_general_prompt_document_input(
+    user_id: int, bot_id: int, document: Dict[str, Any], token: str
+) -> Dict[str, Any]:
+    try:
+        prompt = await download_txt_document(token, document)
+    except TxtFileError as exc:
+        return {"text": f"❌ {exc}", "keyboard": None}
+
+    return await _persist_general_prompt(user_id, bot_id, prompt)
+
+
+async def _persist_general_prompt(
+    user_id: int, bot_id: int, prompt: str
+) -> Dict[str, Any]:
+    await AIConfigService.update_general_prompt(bot_id, prompt)
+    ConversationStateManager.clear_state(user_id)
+
+    char_count = len(prompt)
+    menu = await handle_general_prompt_menu(user_id, bot_id)
+    menu["text"] = (
+        f"✅ Comportamento geral atualizado! ({char_count} caracteres).\n"
+        "Preview e opções abaixo.\n\n" + menu["text"]
+    )
+    return menu
 
 
 async def handle_general_prompt_input(
     user_id: int, bot_id: int, prompt: str
 ) -> Dict[str, Any]:
     """Salva prompt geral"""
-    await AIConfigService.update_general_prompt(bot_id, prompt)
-    ConversationStateManager.clear_state(user_id)
-
-    return {"text": "✅ Comportamento geral atualizado!", "keyboard": None}
+    return await _persist_general_prompt(user_id, bot_id, prompt)
 
 
 async def handle_create_phase_click(user_id: int, bot_id: int) -> Dict[str, Any]:
@@ -209,7 +367,11 @@ async def handle_phase_trigger_input(
     )
 
     return {
-        "text": f'✅ Nome: `{name}`\n✅ Trigger: `{trigger}`\n\nAgora digite o prompt desta fase:\n\nExemplo: "Agora você está na fase de fechamento. Seja direto ao oferecer o produto."',
+        "text": (
+            f"✅ Nome: `{name}`\n✅ Trigger: `{trigger}`\n\n"
+            "Agora digite o prompt desta fase ou envie um arquivo `.txt` como documento.\n\n"
+            'Exemplo: "Agora você está na fase de fechamento. Seja direto ao oferecer o produto."'
+        ),
         "keyboard": None,
     }
 
@@ -221,9 +383,19 @@ async def handle_phase_prompt_input(
     await AIConfigService.create_phase(bot_id, name, prompt, trigger, is_initial=False)
     ConversationStateManager.clear_state(user_id)
 
+    char_count = len(prompt)
+
     return {
-        "text": f"✅ Fase `{name}` criada!\n\nQuando a IA retornar `{trigger}`, esta fase será ativada.",
-        "keyboard": None,
+        "text": (
+            f"✅ Fase `{name}` criada! ({char_count} caracteres).\n"
+            f"Quando a IA retornar `{trigger}`, esta fase será ativada."
+        ),
+        "keyboard": {
+            "inline_keyboard": [
+                [{"text": "🔙 Voltar", "callback_data": f"ai_list_phases:{bot_id}"}],
+                [{"text": "🏠 Menu IA", "callback_data": f"ai_select_bot:{bot_id}"}],
+            ]
+        },
     }
 
 

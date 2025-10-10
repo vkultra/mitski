@@ -83,6 +83,40 @@ class TestTelegramUpdateProcessing:
 
             assert result is None or result == "processed"
 
+    def test_process_voice_message_triggers_audio_task(
+        self, sample_bot, mock_redis_client
+    ):
+        voice_update = {
+            "update_id": 555,
+            "message": {
+                "message_id": 42,
+                "from": {"id": 999, "is_bot": False, "first_name": "Audio"},
+                "chat": {"id": 999, "type": "private"},
+                "date": 1728250000,
+                "voice": {
+                    "file_id": "voice_file_id",
+                    "file_unique_id": "voice_unique",
+                    "duration": 3,
+                    "mime_type": "audio/ogg",
+                    "file_size": 1024,
+                },
+            },
+        }
+
+        from workers.tasks import process_telegram_update
+
+        with patch("workers.audio_tasks.process_audio_message.delay") as mock_delay:
+            result = process_telegram_update.apply(
+                args=[sample_bot.id, voice_update]
+            ).get()
+
+        assert result is None or result == "processed"
+        mock_delay.assert_called_once()
+        kwargs = mock_delay.call_args.kwargs
+        assert kwargs["bot_id"] == sample_bot.id
+        assert kwargs["user_id"] == 999
+        assert kwargs["media"]["type"] == "voice"
+
 
 class TestManagerUpdateProcessing:
     """Testes para processamento de updates do manager"""

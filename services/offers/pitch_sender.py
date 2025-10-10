@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from core.telemetry import logger
 from database.repos import OfferPitchRepository, OfferRepository
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from workers.api_clients import TelegramAPI
 
 if TYPE_CHECKING:
@@ -64,7 +65,10 @@ class PitchSenderService:
 
         for block in blocks:
             # Determina tipo de mídia para efeito apropriado
-            media_type = block.media_type if block.media_file_id else None
+            source_media_type = block.media_type if block.media_file_id else None
+            media_type = (
+                normalize_media_type(source_media_type) if source_media_type else None
+            )
 
             # Aplica efeito de digitação antes de enviar
             if not preview_mode:
@@ -170,9 +174,10 @@ class PitchSenderService:
                 return await self._send_media_message(
                     chat_id,
                     block.media_file_id,
-                    block.media_type,
+                    media_type,
                     block_text or block.text,  # Usa texto processado se disponível
                     bot_id=bot_id,  # Passa bot_id para cache
+                    source_media_type=source_media_type,
                 )
 
             # Se tem apenas texto
@@ -205,6 +210,7 @@ class PitchSenderService:
         media_type: str,
         caption: str = None,
         bot_id: int = None,
+        source_media_type: Optional[str] = None,
     ) -> Optional[int]:
         """
         Envia mensagem com mídia (com suporte a stream entre bots)
@@ -228,16 +234,29 @@ class PitchSenderService:
             if bot_id:
                 from services.media_stream import MediaStreamService
 
-                cached_file_id, stream = await MediaStreamService.get_or_stream_media(
-                    original_file_id=file_id,
-                    bot_id=bot_id,
-                    media_type=media_type,
-                    manager_bot_token=(
-                        self.telegram_api.manager_bot_token
-                        if hasattr(self.telegram_api, "manager_bot_token")
-                        else None
-                    ),
-                )
+                try:
+                    cached_file_id, stream = (
+                        await MediaStreamService.get_or_stream_media(
+                            original_file_id=file_id,
+                            bot_id=bot_id,
+                            media_type=media_type,
+                            manager_bot_token=(
+                                self.telegram_api.manager_bot_token
+                                if hasattr(self.telegram_api, "manager_bot_token")
+                                else None
+                            ),
+                            source_media_type=source_media_type,
+                        )
+                    )
+                except VoiceConversionError:
+                    logger.error(
+                        "Voice conversion failed for pitch block",
+                        extra={
+                            "file_id": file_id,
+                            "bot_id": bot_id,
+                        },
+                    )
+                    return None
 
                 if cached_file_id:
                     # Usar file_id do cache
@@ -267,11 +286,11 @@ class PitchSenderService:
                     parse_mode="Markdown" if caption else None,
                 )
 
-            elif media_type == "audio":
-                result = await self.telegram_api.send_audio(
+            elif media_type == "voice":
+                result = await self.telegram_api.send_voice(
                     token=self.bot_token,
                     chat_id=chat_id,
-                    audio=file_stream if file_stream else file_to_send,
+                    voice=file_stream if file_stream else file_to_send,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                 )
@@ -334,7 +353,7 @@ class PitchSenderService:
             type_fields = {
                 "photo": "photo",  # É um array, pega o último (maior)
                 "video": "video",
-                "audio": "audio",
+                "voice": "voice",
                 "document": "document",
                 "animation": "animation",
             }

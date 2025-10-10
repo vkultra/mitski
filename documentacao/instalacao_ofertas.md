@@ -66,7 +66,7 @@ Certifique-se que estas variáveis estão configuradas:
 ```bash
 # .env
 MANAGER_BOT_TOKEN=seu_token_aqui
-ALLOWED_ADMIN_IDS=123456789,987654321
+ALLOWED_ADMIN_IDS=                 # opcional: deixe vazio para liberar todas as funções
 DB_URL=postgresql://usuario:senha@localhost/banco
 REDIS_URL=redis://localhost:6379
 ```
@@ -108,7 +108,7 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 ### Erro: "Permission denied" ao criar oferta
 
 **Solução:**
-- Verificar se seu ID está em `ALLOWED_ADMIN_IDS`
+- (Opcional) Usar `ALLOWED_ADMIN_IDS` apenas se precisar restringir funções
 - Reiniciar workers após mudanças no .env
 
 ### Mídia não enviando

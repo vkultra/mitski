@@ -21,7 +21,9 @@ from workers.celery_app import celery_app
 
 
 def _resolve_active_settings(owner_user_id: int, bot_id: int):
-    bot_settings = NotificationSettingsRepository.get_for_owner_sync(owner_user_id, bot_id)
+    bot_settings = NotificationSettingsRepository.get_for_owner_sync(
+        owner_user_id, bot_id
+    )
     if bot_settings and bot_settings.enabled and bot_settings.channel_id:
         return bot_settings
 
@@ -32,8 +34,14 @@ def _resolve_active_settings(owner_user_id: int, bot_id: int):
     return None
 
 
-@celery_app.task(bind=True, max_retries=3, name="workers.notifications.tasks.enqueue_sale_notification")
-def enqueue_sale_notification(self: Task, transaction_id: str, origin: str = "auto") -> None:
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    name="workers.notifications.tasks.enqueue_sale_notification",
+)
+def enqueue_sale_notification(
+    self: Task, transaction_id: str, origin: str = "auto"
+) -> None:
     transaction = PixTransactionRepository.get_by_transaction_id_sync(transaction_id)
     if not transaction:
         logger.warning(
@@ -118,7 +126,11 @@ def enqueue_sale_notification(self: Task, transaction_id: str, origin: str = "au
     send_sale_notification_message.delay(transaction.transaction_id)
 
 
-@celery_app.task(bind=True, max_retries=3, name="workers.notifications.tasks.send_sale_notification_message")
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    name="workers.notifications.tasks.send_sale_notification_message",
+)
 def send_sale_notification_message(self: Task, transaction_id: str) -> None:
     record = SaleNotificationsRepository.get_by_transaction_sync(transaction_id)
     if not record:
@@ -212,7 +224,7 @@ def send_sale_notification_message(self: Task, transaction_id: str) -> None:
                     "attempt": self.request.retries + 1,
                 },
             )
-            raise self.retry(countdown=2 ** self.request.retries, exc=exc)
+            raise self.retry(countdown=2**self.request.retries, exc=exc)
 
         SaleNotificationsRepository.mark_status_sync(
             record.transaction_id,

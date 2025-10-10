@@ -6,11 +6,12 @@ import os
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import create_engine, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from core.telemetry import logger
 
-from .models import Bot, BotAIConfig, User
+from .models import Bot, BotAIConfig, Event, User
 
 if TYPE_CHECKING:
     from .models import (
@@ -111,6 +112,25 @@ class BotRepository:
             return False
 
     @staticmethod
+    async def delete_bot(bot_id: int) -> bool:
+        """Deleta bot e remove dependências sem CASCADE explícito."""
+        with SessionLocal() as session:
+            bot = session.query(Bot).filter(Bot.id == bot_id).first()
+            if not bot:
+                return False
+
+            session.query(Event).filter(Event.bot_id == bot_id).delete(
+                synchronize_session=False
+            )
+            session.query(User).filter(User.bot_id == bot_id).delete(
+                synchronize_session=False
+            )
+
+            session.delete(bot)
+            session.commit()
+            return True
+
+    @staticmethod
     async def associate_offer(bot_id: int, offer_id: int) -> bool:
         """Associa oferta ao bot (1 bot = 1 oferta)"""
         from datetime import datetime
@@ -153,18 +173,44 @@ class UserRepository:
     async def get_or_create_user(telegram_id: int, bot_id: int, **kwargs) -> User:
         """Busca ou cria usuário"""
         with SessionLocal() as session:
-            user = (
-                session.query(User)
-                .filter(User.telegram_id == telegram_id, User.bot_id == bot_id)
-                .first()
-            )
+            # Tenta localizar usuário pelo telegram_id (único na tabela)
+            user = session.query(User).filter(User.telegram_id == telegram_id).first()
 
-            if not user:
-                user = User(telegram_id=telegram_id, bot_id=bot_id, **kwargs)
-                session.add(user)
+            if user:
+                updated = False
+                if user.bot_id != bot_id:
+                    user.bot_id = bot_id
+                    updated = True
+                for field, value in kwargs.items():
+                    if value is not None and hasattr(user, field):
+                        setattr(user, field, value)
+                        updated = True
+                if updated:
+                    session.commit()
+                    session.refresh(user)
+                return user
+
+            user = User(telegram_id=telegram_id, bot_id=bot_id, **kwargs)
+            session.add(user)
+            try:
                 session.commit()
-                session.refresh(user)
+            except IntegrityError:
+                session.rollback()
+                existing = (
+                    session.query(User).filter(User.telegram_id == telegram_id).first()
+                )
+                if existing:
+                    if existing.bot_id != bot_id:
+                        existing.bot_id = bot_id
+                    for field, value in kwargs.items():
+                        if value is not None and hasattr(existing, field):
+                            setattr(existing, field, value)
+                    session.commit()
+                    session.refresh(existing)
+                    return existing
+                raise
 
+            session.refresh(user)
             return user
 
     @staticmethod
@@ -1546,6 +1592,28 @@ class PixTransactionRepository:
             return False
 
     @staticmethod
+    def set_tracker_sync(transaction_id: int, tracker_id: int) -> None:
+        """Associa um tracker à transação (idempotente)."""
+        from datetime import datetime
+
+        from .models import PixTransaction
+
+        with SessionLocal() as session:
+            transaction = (
+                session.query(PixTransaction)
+                .filter(PixTransaction.id == transaction_id)
+                .first()
+            )
+            if not transaction:
+                return
+            if getattr(transaction, "tracker_id", None) == tracker_id:
+                return
+            transaction.tracker_id = tracker_id
+            transaction.updated_at = datetime.utcnow()
+            session.add(transaction)
+            session.commit()
+
+    @staticmethod
     async def user_has_paid(bot_id: int, user_telegram_id: int) -> bool:
         from .models import PixTransaction
 
@@ -1836,12 +1904,129 @@ class OfferManualVerificationBlockRepository:
             return False
 
 
+class OfferDiscountBlockRepository:
+    """Repository para blocos de desconto"""
+
+    @staticmethod
+    async def create_block(offer_id: int, order: int, **kwargs):
+        """Cria novo bloco de desconto"""
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            block = OfferDiscountBlock(offer_id=offer_id, order=order, **kwargs)
+            session.add(block)
+            session.commit()
+            session.refresh(block)
+            return block
+
+    @staticmethod
+    async def get_blocks_by_offer(offer_id: int) -> List:
+        """Lista blocos de desconto"""
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDiscountBlock)
+                .filter(OfferDiscountBlock.offer_id == offer_id)
+                .order_by(OfferDiscountBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    def get_blocks_by_offer_sync(offer_id: int) -> List:
+        """Lista blocos (versão síncrona)"""
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDiscountBlock)
+                .filter(OfferDiscountBlock.offer_id == offer_id)
+                .order_by(OfferDiscountBlock.order)
+                .all()
+            )
+
+    @staticmethod
+    async def get_block_by_id(block_id: int):
+        """Busca bloco por ID"""
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            return (
+                session.query(OfferDiscountBlock)
+                .filter(OfferDiscountBlock.id == block_id)
+                .first()
+            )
+
+    @staticmethod
+    async def update_block(block_id: int, **kwargs) -> bool:
+        """Atualiza bloco"""
+        from datetime import datetime
+
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferDiscountBlock)
+                .filter(OfferDiscountBlock.id == block_id)
+                .first()
+            )
+            if block:
+                for key, value in kwargs.items():
+                    if hasattr(block, key):
+                        setattr(block, key, value)
+                block.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    @staticmethod
+    async def delete_block(block_id: int) -> bool:
+        """Deleta bloco"""
+        from .models import OfferDiscountBlock
+
+        with SessionLocal() as session:
+            block = (
+                session.query(OfferDiscountBlock)
+                .filter(OfferDiscountBlock.id == block_id)
+                .first()
+            )
+            if not block:
+                return False
+
+            offer_id = block.offer_id
+            deleted_order = block.order
+            session.delete(block)
+
+            remaining = (
+                session.query(OfferDiscountBlock)
+                .filter(
+                    OfferDiscountBlock.offer_id == offer_id,
+                    OfferDiscountBlock.order > deleted_order,
+                )
+                .order_by(OfferDiscountBlock.order)
+                .all()
+            )
+
+            for item in remaining:
+                item.order -= 1
+
+            session.commit()
+            return True
+
+
 class MediaFileCacheRepository:
     """Repository para cache de file_ids entre bots"""
 
     @staticmethod
-    async def get_cached_file_id(original_file_id: str, bot_id: int) -> Optional[str]:
-        """Busca file_id em cache para o bot específico"""
+    async def get_cached_file_id(
+        original_file_id: str,
+        bot_id: int,
+        expected_media_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """Busca file_id em cache para o bot específico.
+
+        Se um tipo esperado for informado e divergir do armazenado, o registro é
+        descartado para forçar novo streaming/conversão."""
         from .models import MediaFileCache
 
         with SessionLocal() as session:
@@ -1853,7 +2038,25 @@ class MediaFileCacheRepository:
                 )
                 .first()
             )
-            return cache.cached_file_id if cache else None
+
+            if not cache:
+                return None
+
+            if expected_media_type and cache.media_type != expected_media_type:
+                logger.info(
+                    "Cached media type mismatch; forcing re-stream",
+                    extra={
+                        "original_file_id": original_file_id,
+                        "bot_id": bot_id,
+                        "cached_media_type": cache.media_type,
+                        "expected_media_type": expected_media_type,
+                    },
+                )
+                session.delete(cache)
+                session.commit()
+                return None
+
+            return cache.cached_file_id
 
     @staticmethod
     async def save_cached_file_id(

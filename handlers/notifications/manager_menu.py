@@ -1,11 +1,12 @@
 """Fluxos do menu de notificações no bot gerenciador."""
+
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
 from core.telemetry import logger
-from database.notifications.repos import NotificationSettingsRepository
 from database.notifications.models import NotificationSettings
+from database.notifications.repos import NotificationSettingsRepository
 from database.repos import BotRepository
 from services.bot_registration import BotRegistrationService
 from services.conversation_state import ConversationStateManager
@@ -17,7 +18,10 @@ from .validation import (
     validate_and_save_channel,
 )
 
-def _build_keyboard(rows: List[List[Dict[str, str]]]) -> Dict[str, List[List[Dict[str, str]]]]:
+
+def _build_keyboard(
+    rows: List[List[Dict[str, str]]],
+) -> Dict[str, List[List[Dict[str, str]]]]:
     return {"inline_keyboard": rows}
 
 
@@ -34,7 +38,12 @@ async def handle_notifications_menu(user_id: int) -> Dict[str, any]:
     )
     keyboard = _build_keyboard(
         [
-            [{"text": "📡 Definir/Alterar Canal", "callback_data": "notifications_configure"}],
+            [
+                {
+                    "text": "📡 Definir/Alterar Canal",
+                    "callback_data": "notifications_configure",
+                }
+            ],
             [{"text": "👁 Ver Configuração", "callback_data": "notifications_view"}],
             [{"text": "🚫 Desativar", "callback_data": "notifications_disable"}],
             [{"text": "🧪 Enviar Teste", "callback_data": "notifications_test"}],
@@ -101,7 +110,9 @@ async def _ensure_bot_ownership(user_id: int, bot_id: Optional[int]) -> Optional
 
     bot = BotRepository.get_bot_by_id_sync(bot_id)
     if not bot or bot.admin_id != user_id:
-        raise NotificationValidationError("Você não pode alterar notificações deste bot.")
+        raise NotificationValidationError(
+            "Você não pode alterar notificações deste bot."
+        )
     return bot_id
 
 
@@ -221,13 +232,22 @@ async def handle_notifications_test_scope(
     if bot_id is None:
         settings_obj = await NotificationSettingsRepository.get_default(user_id)
     else:
-        settings_obj = await NotificationSettingsRepository.get_for_owner(user_id, bot_id)
+        settings_obj = await NotificationSettingsRepository.get_for_owner(
+            user_id, bot_id
+        )
 
     if not settings_obj or not settings_obj.enabled or not settings_obj.channel_id:
         return {
             "text": "⚠️ Configure um canal ativo antes de executar o teste.",
             "keyboard": _build_keyboard(
-                [[{"text": "Configurar agora", "callback_data": "notifications_configure"}]]
+                [
+                    [
+                        {
+                            "text": "Configurar agora",
+                            "callback_data": "notifications_configure",
+                        }
+                    ]
+                ]
             ),
         }
 

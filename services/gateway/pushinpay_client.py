@@ -77,6 +77,49 @@ class PushinPayClient:
             raise
 
     @staticmethod
+    def create_pix_sync(
+        token: str, value_cents: int, webhook_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Versão síncrona para criar uma cobrança PIX (para uso em handlers sync/async).
+        """
+        if value_cents < 50:
+            raise ValueError("Valor mínimo é 50 centavos")
+
+        payload: Dict[str, Any] = {"value": int(value_cents)}
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    f"{PushinPayClient.BASE_URL}/api/pix/cashIn",
+                    json=payload,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(
+                    "PIX created successfully (sync)",
+                    extra={
+                        "transaction_id": result.get("id"),
+                        "value_cents": value_cents,
+                    },
+                )
+                return result
+        except httpx.HTTPError as e:
+            logger.error(
+                "Error creating PIX (sync)",
+                extra={"error": str(e), "value_cents": value_cents},
+            )
+            raise
+
+    @staticmethod
     async def check_payment_status(token: str, transaction_id: str) -> Dict[str, Any]:
         """
         Verifica status de um pagamento PIX

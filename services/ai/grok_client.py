@@ -6,7 +6,7 @@ import asyncio
 from typing import Any, Dict, List
 
 from xai_sdk import AsyncClient
-from xai_sdk.chat import Response, assistant, system, user
+from xai_sdk.chat import Response, assistant, image, system, user
 
 from core.redis_client import redis_client
 from core.telemetry import logger
@@ -112,7 +112,36 @@ class GrokAPIClient:
             if not await self._check_rate_limit():
                 raise Exception("Rate limit exceeded: 480 req/min")
 
-        # Log detalhado da requisição
+        def _build_user_preview(message: Dict[str, Any]) -> str:
+            """Cria preview seguro sem despejar base64 gigante nos logs."""
+
+            content = message.get("content")
+            if not content:
+                return ""
+
+            if isinstance(content, list):
+                preview_parts: List[str] = []
+                for item in content:
+                    item_type = item.get("type")
+                    if item_type == "text":
+                        preview_parts.append((item.get("text") or "")[:60])
+                    elif item_type == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if url.startswith("data:image"):
+                            preview_parts.append("[image:data-url]")
+                        elif url:
+                            preview_parts.append(f"[image:{url[:30]}…]")
+                        else:
+                            preview_parts.append("[image]")
+                combined = " ".join(filter(None, preview_parts))
+                return combined[:200]
+
+            text_content = str(content)
+            if text_content.startswith("data:image"):
+                return "[image:data-url]"
+            return text_content[:200]
+
+        # Log detalhado da requisição com preview seguro
         logger.info(
             "Grok API request started",
             extra={
@@ -127,7 +156,7 @@ class GrokAPIClient:
                 ),
                 "last_user_message": next(
                     (
-                        m.get("content", "")[:200]
+                        _build_user_preview(m)
                         for m in reversed(messages)
                         if m.get("role") == "user"
                     ),
@@ -144,22 +173,56 @@ class GrokAPIClient:
                     model=model, temperature=temperature, max_tokens=max_tokens
                 )
 
-                # Adiciona mensagens ao chat
+                # Adiciona mensagens ao chat convertendo multimodal corretamente
                 for msg in messages:
-                    if msg["role"] == "system":
-                        # System messages: usar helper system()
-                        chat.append(system(msg["content"]))
-                    elif msg["role"] == "user":
-                        # Verifica se é multimodal (com imagem)
-                        if isinstance(msg.get("content"), list):
-                            # Multimodal: usar dict diretamente
-                            chat.messages.append(msg)
+                    role = msg.get("role")
+
+                    if role == "system":
+                        chat.append(system(msg.get("content") or ""))
+                        continue
+
+                    if role == "assistant":
+                        chat.append(assistant(msg.get("content") or ""))
+                        continue
+
+                    if role == "user":
+                        content = msg.get("content")
+
+                        if isinstance(content, list):
+                            parts: List[Any] = []
+                            for item in content:
+                                item_type = item.get("type")
+                                if item_type == "text":
+                                    parts.append(item.get("text") or "")
+                                elif item_type == "image_url":
+                                    image_payload = item.get("image_url") or {}
+                                    image_url = image_payload.get("url")
+                                    if not image_url:
+                                        continue
+
+                                    detail = image_payload.get("detail")
+                                    try:
+                                        parts.append(
+                                            image(image_url, detail=detail)
+                                            if detail
+                                            else image(image_url)
+                                        )
+                                    except TypeError:
+                                        # detail pode ser inválido; tenta sem
+                                        parts.append(image(image_url))
+
+                            if parts:
+                                chat.append(user(*parts))
+                            else:
+                                chat.append(user(""))
                         else:
-                            # Texto simples: usar helper user()
-                            chat.append(user(msg["content"]))
-                    elif msg["role"] == "assistant":
-                        # Assistant messages do histórico: usar helper assistant()
-                        chat.append(assistant(msg["content"]))
+                            chat.append(user(content or ""))
+                        continue
+
+                    logger.warning(
+                        "Unsupported message role for Grok client",
+                        extra={"role": role},
+                    )
 
                 # Executa request
                 response: Response = await chat.sample()
@@ -227,3 +290,39 @@ class GrokAPIClient:
         """Fecha cliente (SDK gerencia automaticamente)"""
         # xai_sdk gerencia conexões automaticamente
         pass
+
+    async def tokenize_text(self, text: str) -> int:
+        """Calls tokenization endpoint to get prompt token count if available.
+
+        Returns integer token count; raises on HTTP failures.
+        """
+        import httpx
+
+        from core.config import settings as _settings
+
+        base = getattr(_settings, "GROK_API_BASE_URL", "https://api.x.ai/v1").rstrip(
+            "/"
+        )
+        api_key = getattr(_settings, "XAI_API_KEY", None)
+        if not api_key:
+            raise RuntimeError("XAI_API_KEY não configurada")
+        url = f"{base}/tokenize-text"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json={"text": text or ""}, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+            tokens = body.get("tokens")
+            if isinstance(tokens, list):
+                return int(len(tokens))
+            # Some implementations might return count
+            count = body.get("token_count")
+            return int(count) if isinstance(count, int) else 0
+
+
+# Alias para compatibilidade
+GrokClient = GrokAPIClient

@@ -8,6 +8,7 @@ from typing import Optional
 from core.telemetry import logger
 from database.repos import UpsellAnnouncementBlockRepository
 from services.gateway.upsell_pix_processor import UpsellPixProcessor
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from workers.api_clients import TelegramAPI
 
 
@@ -106,6 +107,8 @@ class AnnouncementSender:
     async def _send_media(self, block, chat_id: int, bot_id: Optional[int] = None):
         """Envia mídia com legenda (com suporte a stream entre bots)"""
         # Processar texto/legenda
+        source_media_type = block.media_type
+        media_type = normalize_media_type(source_media_type)
         caption = block.text or ""
         if UpsellPixProcessor.has_pixupsell_tag(caption) and bot_id:
             caption, transaction = (
@@ -143,12 +146,23 @@ class AnnouncementSender:
         if bot_id:
             from services.media_stream import MediaStreamService
 
-            cached_file_id, stream = await MediaStreamService.get_or_stream_media(
-                original_file_id=block.media_file_id,
-                bot_id=bot_id,
-                media_type=block.media_type,
-                manager_bot_token=None,
-            )
+            try:
+                cached_file_id, stream = await MediaStreamService.get_or_stream_media(
+                    original_file_id=block.media_file_id,
+                    bot_id=bot_id,
+                    media_type=media_type,
+                    manager_bot_token=None,
+                    source_media_type=source_media_type,
+                )
+            except VoiceConversionError:
+                logger.error(
+                    "Voice conversion failed for upsell announcement block",
+                    extra={
+                        "upsell_id": block.upsell_id,
+                        "bot_id": bot_id,
+                    },
+                )
+                return
 
             if cached_file_id:
                 # Usar file_id do cache
@@ -159,7 +173,7 @@ class AnnouncementSender:
 
         # Enviar mídia usando métodos específicos
         result = None
-        if block.media_type == "photo":
+        if media_type == "photo":
             result = await self.telegram_api.send_photo(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -167,7 +181,7 @@ class AnnouncementSender:
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "video":
+        elif media_type == "video":
             result = await self.telegram_api.send_video(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -175,15 +189,15 @@ class AnnouncementSender:
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "audio":
-            result = await self.telegram_api.send_audio(
+        elif media_type == "voice":
+            result = await self.telegram_api.send_voice(
                 token=self.bot_token,
                 chat_id=chat_id,
-                audio=file_stream if file_stream else file_to_send,
+                voice=file_stream if file_stream else file_to_send,
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "animation":
+        elif media_type == "animation":
             result = await self.telegram_api.send_animation(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -203,7 +217,7 @@ class AnnouncementSender:
         # Se enviou com stream, cachear o novo file_id
         # TODO: Implementar cache de file_id se necessário
         if result and file_stream and bot_id:
-            new_file_id = self._extract_file_id_from_result(result, block.media_type)
+            new_file_id = self._extract_file_id_from_result(result, media_type)
             if new_file_id:
                 # Cache será implementado futuramente
                 pass

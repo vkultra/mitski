@@ -5,7 +5,9 @@ Sender para blocos de entregável de upsell
 import asyncio
 from typing import Optional
 
+from core.telemetry import logger
 from database.repos import UpsellDeliverableBlockRepository
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from workers.api_clients import TelegramAPI
 
 
@@ -68,6 +70,8 @@ class DeliverableSender:
 
     async def _send_media(self, block, chat_id: int, bot_id: Optional[int] = None):
         """Envia mídia com legenda (com suporte a stream entre bots)"""
+        source_media_type = block.media_type
+        media_type = normalize_media_type(source_media_type)
         caption = block.text if block.text else None
         file_to_send = block.media_file_id
         file_stream = None
@@ -76,12 +80,23 @@ class DeliverableSender:
         if bot_id:
             from services.media_stream import MediaStreamService
 
-            cached_file_id, stream = await MediaStreamService.get_or_stream_media(
-                original_file_id=block.media_file_id,
-                bot_id=bot_id,
-                media_type=block.media_type,
-                manager_bot_token=None,
-            )
+            try:
+                cached_file_id, stream = await MediaStreamService.get_or_stream_media(
+                    original_file_id=block.media_file_id,
+                    bot_id=bot_id,
+                    media_type=media_type,
+                    manager_bot_token=None,
+                    source_media_type=source_media_type,
+                )
+            except VoiceConversionError:
+                logger.error(
+                    "Voice conversion failed for upsell deliverable block",
+                    extra={
+                        "upsell_id": getattr(block, "upsell_id", None),
+                        "bot_id": bot_id,
+                    },
+                )
+                return
 
             if cached_file_id:
                 # Usar file_id do cache
@@ -92,7 +107,7 @@ class DeliverableSender:
 
         # Enviar mídia
         result = None
-        if block.media_type == "photo":
+        if media_type == "photo":
             result = await self.telegram_api.send_photo(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -100,7 +115,7 @@ class DeliverableSender:
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "video":
+        elif media_type == "video":
             result = await self.telegram_api.send_video(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -108,15 +123,15 @@ class DeliverableSender:
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "audio":
-            result = await self.telegram_api.send_audio(
+        elif media_type == "voice":
+            result = await self.telegram_api.send_voice(
                 token=self.bot_token,
                 chat_id=chat_id,
-                audio=file_stream if file_stream else file_to_send,
+                voice=file_stream if file_stream else file_to_send,
                 caption=caption,
                 parse_mode="Markdown" if caption else None,
             )
-        elif block.media_type == "animation":
+        elif media_type == "animation":
             result = await self.telegram_api.send_animation(
                 token=self.bot_token,
                 chat_id=chat_id,
@@ -136,7 +151,7 @@ class DeliverableSender:
         # Se enviou com stream, cachear o novo file_id
         # TODO: Implementar cache de file_id se necessário
         if result and file_stream and bot_id:
-            new_file_id = self._extract_file_id_from_result(result, block.media_type)
+            new_file_id = self._extract_file_id_from_result(result, media_type)
             if new_file_id:
                 # Cache será implementado futuramente
                 pass

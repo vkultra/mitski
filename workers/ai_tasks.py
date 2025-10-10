@@ -53,6 +53,13 @@ def process_ai_message(
             )
         )
 
+        if response_text is None:
+            logger.info(
+                "AI response suppressed",
+                extra={"bot_id": bot_id, "user_id": user_telegram_id},
+            )
+            return
+
         # Verificar se há oferta detectada no sufixo
         offer_id_to_send = None
         if response_text and "__OFFER_DETECTED:" in response_text:

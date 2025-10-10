@@ -4,13 +4,11 @@ Bot Gerenciador - Comandos administrativos
 
 import os
 
+from core.config import settings
 from core.security import encrypt
 from database.repos import BotRepository
 from workers.api_clients import TelegramAPI
 
-ALLOWED_ADMIN_IDS = [
-    int(x) for x in os.environ.get("ALLOWED_ADMIN_IDS", "").split(",") if x
-]
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "http://localhost:8000")
 
 
@@ -25,7 +23,7 @@ async def register_bot(admin_id: int, bot_token: str) -> dict:
     Returns:
         dict com informações do bot registrado
     """
-    if admin_id not in ALLOWED_ADMIN_IDS:
+    if not settings.is_user_authorized(admin_id):
         raise PermissionError("Usuário não autorizado")
 
     # 1. Valida token com a API do Telegram
@@ -62,7 +60,7 @@ async def register_bot(admin_id: int, bot_token: str) -> dict:
 
 async def list_bots(admin_id: int) -> list:
     """Lista todos os bots de um admin"""
-    if admin_id not in ALLOWED_ADMIN_IDS:
+    if not settings.is_user_authorized(admin_id):
         raise PermissionError("Usuário não autorizado")
 
     return await BotRepository.get_bots_by_admin(admin_id)
@@ -70,7 +68,7 @@ async def list_bots(admin_id: int) -> list:
 
 async def deactivate_bot(admin_id: int, bot_id: int) -> bool:
     """Desativa um bot"""
-    if admin_id not in ALLOWED_ADMIN_IDS:
+    if not settings.is_user_authorized(admin_id):
         raise PermissionError("Usuário não autorizado")
 
     bot = await BotRepository.get_bot_by_id(bot_id)

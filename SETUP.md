@@ -1,13 +1,13 @@
-# =€ Guia de Setup - Telegram Multi-Bot Manager
+# =ï¿½ Guia de Setup - Telegram Multi-Bot Manager
 
-## =Ë Pré-requisitos
+## =ï¿½ Prï¿½-requisitos
 
 - Docker & Docker Compose
 - Python 3.11+ (para desenvolvimento local)
 - Git
 - ngrok (para desenvolvimento local)
 
-## ¡ Setup Rápido
+## ï¿½ Setup Rï¿½pido
 
 ### 1. **Configurar Pre-commit Hooks** (IMPORTANTE!)
 
@@ -23,11 +23,11 @@ pre-commit run --all-files
 ```
 
 **O que isso faz?**
--  Formata código automaticamente antes de cada commit
+-  Formata cï¿½digo automaticamente antes de cada commit
 -  Verifica erros de sintaxe
 -  Valida type hints
--  Detecta problemas de segurança
--  Remove espaços em branco desnecessários
+-  Detecta problemas de seguranï¿½a
+-  Remove espaï¿½os em branco desnecessï¿½rios
 
 ### 2. **Configurar Ambiente**
 
@@ -39,16 +39,16 @@ cp .env.example .env
 nano .env
 ```
 
-Configurações necessárias no `.env`:
+Configuraï¿½ï¿½es necessï¿½rias no `.env`:
 ```bash
 MANAGER_BOT_TOKEN=seu_token_aqui
 TELEGRAM_WEBHOOK_SECRET=seu_secret_aqui
 WEBHOOK_BASE_URL=https://seu-ngrok-url.ngrok-free.dev
 ENCRYPTION_KEY=base64:sua_key_aqui
-ALLOWED_ADMIN_IDS=seu_telegram_id
+ALLOWED_ADMIN_IDS=                 # opcional: deixe vazio para liberar todas as funÃ§Ãµes
 ```
 
-### 3. **Iniciar Serviços**
+### 3. **Iniciar Serviï¿½os**
 
 ```bash
 # Usar Makefile (recomendado)
@@ -58,7 +58,7 @@ make up
 docker-compose up -d
 ```
 
-### 4. **Verificar se está funcionando**
+### 4. **Verificar se estï¿½ funcionando**
 
 ```bash
 # Smoke tests
@@ -68,19 +68,19 @@ make smoke
 bash scripts/smoke_test.sh
 ```
 
-## =à Comandos Úteis (Makefile)
+## =ï¿½ Comandos ï¿½teis (Makefile)
 
 ```bash
 make help          # Ver todos os comandos
-make up            # Iniciar serviços
-make down          # Parar serviços
-make restart       # Reiniciar serviços
+make up            # Iniciar serviï¿½os
+make down          # Parar serviï¿½os
+make restart       # Reiniciar serviï¿½os
 make logs          # Ver logs
 make test          # Rodar testes
 make smoke         # Smoke tests
-make format        # Formatar código
-make lint          # Verificar código
-make clean         # Limpar arquivos temporários
+make format        # Formatar cï¿½digo
+make lint          # Verificar cï¿½digo
+make clean         # Limpar arquivos temporï¿½rios
 ```
 
 ## = Workflow de Desenvolvimento
@@ -94,7 +94,7 @@ git pull origin main
 # 2. Criar nova branch
 git checkout -b feature/minha-feature
 
-# 3. Iniciar serviços
+# 3. Iniciar serviï¿½os
 make up
 ```
 
@@ -104,7 +104,7 @@ make up
 # Ver logs em tempo real
 make watch
 
-# Formatar código
+# Formatar cï¿½digo
 make format
 
 # Verificar qualidade
@@ -114,7 +114,7 @@ make lint
 ### **Antes de Commitar**
 
 ```bash
-# 1. Formatar código
+# 1. Formatar cï¿½digo
 make format
 
 # 2. Rodar testes
@@ -129,19 +129,19 @@ git commit -m "feat: adiciona nova funcionalidade"
 ```
 
 **O que acontece no commit?**
-1. Pre-commit hooks são executados automaticamente
-2. Código é formatado com Black
-3. Imports são organizados com isort
-4. Erros são detectados com Flake8
-5. Type hints são verificados com MyPy
-6. Se algo falhar, o commit é bloqueado
+1. Pre-commit hooks sï¿½o executados automaticamente
+2. Cï¿½digo ï¿½ formatado com Black
+3. Imports sï¿½o organizados com isort
+4. Erros sï¿½o detectados com Flake8
+5. Type hints sï¿½o verificados com MyPy
+6. Se algo falhar, o commit ï¿½ bloqueado
 
-## >ê Rodando Testes
+## >ï¿½ Rodando Testes
 
 ### **Testes Locais (sem Docker)**
 
 ```bash
-# Instalar dependências
+# Instalar dependï¿½ncias
 pip install -r requirements-dev.txt
 
 # Rodar testes
@@ -166,7 +166,7 @@ make coverage
 
 ## = Debugging
 
-### **Ver logs específicos**
+### **Ver logs especï¿½ficos**
 
 ```bash
 # Webhook
@@ -198,14 +198,14 @@ make shell-redis
 ### **Verificar status**
 
 ```bash
-# Status dos serviços
+# Status dos serviï¿½os
 make status
 
 # Health check
 curl http://localhost:8000/health
 ```
 
-## = Segurança
+## = Seguranï¿½a
 
 ### **Verificar vulnerabilidades**
 
@@ -217,33 +217,33 @@ pip install safety
 make security
 ```
 
-### **Boas práticas**
+### **Boas prï¿½ticas**
 
-- L NUNCA commite secrets no código
--  Use variáveis de ambiente
+- L NUNCA commite secrets no cï¿½digo
+-  Use variï¿½veis de ambiente
 -  Adicione `.env` ao `.gitignore`
 -  Gere ENCRYPTION_KEY forte
--  Mantenha dependências atualizadas
+-  Mantenha dependï¿½ncias atualizadas
 
-## =¢ Deploy
+## =ï¿½ Deploy
 
-### **Preparar para produção**
+### **Preparar para produï¿½ï¿½o**
 
 ```bash
 # 1. Rodar todos os testes
 make all
 
-# 2. Verificar segurança
+# 2. Verificar seguranï¿½a
 make security
 
-# 3. Build para produção
+# 3. Build para produï¿½ï¿½o
 docker-compose -f docker-compose.prod.yml build
 
 # 4. Deploy
 docker-compose -f docker-compose.prod.yml up -d
 ```
 
-## =Ê Monitoramento
+## =ï¿½ Monitoramento
 
 ### **Health checks**
 
@@ -258,15 +258,15 @@ docker-compose exec redis redis-cli ping
 docker-compose exec postgres pg_isready
 ```
 
-### **Métricas**
+### **Mï¿½tricas**
 
 - Logs estruturados em JSON
 - Celery flower para monitorar workers
-- Prometheus para métricas (futuro)
+- Prometheus para mï¿½tricas (futuro)
 
-## <˜ Troubleshooting
+## <ï¿½ Troubleshooting
 
-### **Problema: Pre-commit não está rodando**
+### **Problema: Pre-commit nï¿½o estï¿½ rodando**
 
 ```bash
 # Reinstalar hooks
@@ -274,7 +274,7 @@ pre-commit uninstall
 pre-commit install
 ```
 
-### **Problema: Docker não inicia**
+### **Problema: Docker nï¿½o inicia**
 
 ```bash
 # Ver logs de erro
@@ -301,26 +301,26 @@ make test
 
 ### **Problema: Webhook retorna 422**
 
-- Verifique se o webhook secret está correto
+- Verifique se o webhook secret estï¿½ correto
 - Confira logs: `make logs-webhook`
 - Teste manualmente: `curl -X POST http://localhost:8000/health`
 
-## =Ú Recursos
+## =ï¿½ Recursos
 
-- [Documentação de Testes](TESTING.md)
+- [Documentaï¿½ï¿½o de Testes](TESTING.md)
 - [Arquitetura](AGENTS.MD)
 - [Pre-commit Hooks](.pre-commit-config.yaml)
-- [Configuração](.env)
+- [Configuraï¿½ï¿½o](.env)
 
-## <“ Próximos Passos
+## <ï¿½ Prï¿½ximos Passos
 
 1.  Configure pre-commit hooks
 2.  Rode smoke tests
 3.  Teste o bot no Telegram
-4. =Ý Adicione seus primeiros testes
-5. =Ý Configure CI/CD (GitHub Actions)
-6. =Ý Configure monitoramento (Prometheus)
+4. =ï¿½ Adicione seus primeiros testes
+5. =ï¿½ Configure CI/CD (GitHub Actions)
+6. =ï¿½ Configure monitoramento (Prometheus)
 
 ---
 
-**Dúvidas?** Consulte `make help` para ver todos os comandos disponíveis!
+**Dï¿½vidas?** Consulte `make help` para ver todos os comandos disponï¿½veis!

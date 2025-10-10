@@ -11,6 +11,7 @@ from core.config import settings
 from core.telemetry import logger
 from database.repos import MediaFileCacheRepository, StartTemplateBlockRepository
 from services.media_stream import MediaStreamService
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from services.typing_effect import TypingEffectService
 from workers.api_clients import TelegramAPI
 
@@ -43,7 +44,10 @@ class StartTemplateSenderService:
         sent_ids: List[int] = []
 
         for block in blocks:
-            media_type = block.media_type if block.media_file_id else None
+            source_media_type = block.media_type if block.media_file_id else None
+            media_type = (
+                normalize_media_type(source_media_type) if source_media_type else None
+            )
 
             if not preview_mode:
                 if block.delay_seconds > 0:
@@ -101,7 +105,10 @@ class StartTemplateSenderService:
     ) -> Optional[int]:
         text = block.text or ""
         media_file_id = block.media_file_id
-        media_type = block.media_type
+        source_media_type = block.media_type if media_file_id else None
+        media_type = (
+            normalize_media_type(source_media_type) if source_media_type else None
+        )
 
         result = None
         parse_mode: Optional[str] = self.DEFAULT_PARSE_MODE
@@ -115,6 +122,7 @@ class StartTemplateSenderService:
                 caption=text,
                 cache_media=cache_media,
                 parse_mode=parse_mode,
+                source_media_type=source_media_type,
             )
             media_file_id = cached_id
 
@@ -166,22 +174,35 @@ class StartTemplateSenderService:
         cache_media: bool,
         parse_mode: Optional[str],
         force_stream: bool = False,
+        source_media_type: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[dict]]:
         if not force_stream:
             cached_id = await MediaFileCacheRepository.get_cached_file_id(
                 original_file_id=original_file_id,
                 bot_id=bot_id,
+                expected_media_type=media_type,
             )
             if cached_id:
                 return cached_id, None
 
-        cached_id, stream = await MediaStreamService.get_or_stream_media(
-            original_file_id=original_file_id,
-            bot_id=bot_id,
-            media_type=media_type,
-            manager_bot_token=settings.MANAGER_BOT_TOKEN,
-            skip_cache=force_stream,
-        )
+        try:
+            cached_id, stream = await MediaStreamService.get_or_stream_media(
+                original_file_id=original_file_id,
+                bot_id=bot_id,
+                media_type=media_type,
+                manager_bot_token=settings.MANAGER_BOT_TOKEN,
+                skip_cache=force_stream,
+                source_media_type=source_media_type,
+            )
+        except VoiceConversionError:
+            logger.error(
+                "Voice conversion failed for start block",
+                extra={
+                    "bot_id": bot_id,
+                    "original_file_id": original_file_id,
+                },
+            )
+            return (None, None)
 
         if cached_id:
             return cached_id, None
@@ -234,11 +255,11 @@ class StartTemplateSenderService:
                 caption=caption,
                 parse_mode=parse_mode,
             )
-        if media_type == "audio":
-            return await self.api.send_audio(
+        if media_type == "voice":
+            return await self.api.send_voice(
                 token=self.bot_token,
                 chat_id=chat_id,
-                audio=media_stream,
+                voice=media_stream,
                 caption=caption,
                 parse_mode=parse_mode,
             )
@@ -274,11 +295,11 @@ class StartTemplateSenderService:
                 caption=caption,
                 parse_mode=parse_mode,
             )
-        if media_type == "audio":
-            return await self.api.send_audio(
+        if media_type == "voice":
+            return await self.api.send_voice(
                 token=self.bot_token,
                 chat_id=chat_id,
-                audio=file_id,
+                voice=file_id,
                 caption=caption,
                 parse_mode=parse_mode,
             )
@@ -303,6 +324,9 @@ class StartTemplateSenderService:
         media_type: Optional[str],
         parse_mode: Optional[str],
     ) -> Tuple[Optional[str], Optional[dict], Optional[str]]:
+        source_media_type = (
+            block.media_type if getattr(block, "media_file_id", None) else None
+        )
         details = self._extract_error_details(exc)
         logger.warning(
             "Start media send failed",
@@ -339,6 +363,7 @@ class StartTemplateSenderService:
                     cache_media=cache_media,
                     parse_mode=next_parse_mode,
                     force_stream=True,
+                    source_media_type=source_media_type,
                 )
             if target_file_id:
                 result = await self._send_media_message(
@@ -360,6 +385,7 @@ class StartTemplateSenderService:
                 cache_media=cache_media,
                 parse_mode=parse_mode,
                 force_stream=True,
+                source_media_type=source_media_type,
             )
             if result:
                 return media_file_id, result, parse_mode
@@ -420,8 +446,8 @@ class StartTemplateSenderService:
                 return photos[-1].get("file_id")
         if media_type == "video":
             return result_payload.get("video", {}).get("file_id")
-        if media_type == "audio":
-            return result_payload.get("audio", {}).get("file_id")
+        if media_type == "voice":
+            return result_payload.get("voice", {}).get("file_id")
         return result_payload.get("document", {}).get("file_id")
 
     async def _auto_delete_message(

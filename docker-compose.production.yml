@@ -13,6 +13,7 @@ services:
       - nginx_cache:/var/cache/nginx
     depends_on:
       - webhook
+      - flower
     restart: always
     networks:
       - app-network
@@ -54,7 +55,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A workers.celery_app worker --concurrency=10 -l warning --max-tasks-per-child=1000
+    command: celery -A workers.celery_app worker -Q celery,recovery,audio --concurrency=10 -l warning --max-tasks-per-child=1000
     env_file: .env.production
     environment:
       - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
@@ -79,6 +80,86 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
+
+  # Workers dedicados para bans
+  worker-bans:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker -Q bans --concurrency=2 -l warning --max-tasks-per-child=1000
+    env_file: .env.production
+    environment:
+      - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Workers dedicados ao espelhamento (mirror)
+  worker-mirror:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker -Q mirror,mirror_high --concurrency=5 -l warning --max-tasks-per-child=1000
+    env_file: .env.production
+    environment:
+      - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Scheduler (Celery Beat)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app beat -l info
+    env_file: .env.production
+    environment:
+      - DB_URL=postgresql+psycopg://admin:${DB_PASSWORD:-senha_segura}@postgres:5432/telegram_bots
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
 
   # Redis Cache
   redis:

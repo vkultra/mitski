@@ -12,7 +12,14 @@ import requests
 
 from core.redis_client import redis_client
 from core.telemetry import logger
-from database.models import Bot, MirrorBuffer, MirrorGroup, User, UserTopic
+from database.models import (
+    Bot,
+    MirrorBuffer,
+    MirrorGlobalConfig,
+    MirrorGroup,
+    User,
+    UserTopic,
+)
 from database.repos import SessionLocal
 
 
@@ -65,6 +72,76 @@ class MirrorService:
             redis_client.setex(cache_key, 600, json.dumps(config))
 
             return config
+
+    @classmethod
+    def ensure_centralized_mirror_for_bot(cls, bot_id: int, admin_id: int) -> bool:
+        """Garante espelhamento centralizado para um bot recém-cadastrado."""
+        with SessionLocal() as session:
+            global_config = (
+                session.query(MirrorGlobalConfig)
+                .filter_by(admin_id=admin_id, is_active=True)
+                .first()
+            )
+
+            if not global_config or not global_config.use_centralized_mode:
+                return False
+
+            if not global_config.manager_group_id:
+                logger.warning(
+                    "Centralized mirror active without manager group id",
+                    extra={"admin_id": admin_id},
+                )
+                return False
+
+            mirror_group = session.query(MirrorGroup).filter_by(bot_id=bot_id).first()
+
+            updated = False
+
+            if mirror_group:
+                desired_values = {
+                    "group_id": global_config.manager_group_id,
+                    "use_manager_bot": True,
+                    "manager_group_id": global_config.manager_group_id,
+                    "is_active": True,
+                    "batch_size": global_config.batch_size,
+                    "batch_delay": global_config.batch_delay,
+                    "flush_timeout": global_config.flush_timeout,
+                }
+
+                for field, value in desired_values.items():
+                    if getattr(mirror_group, field) != value:
+                        setattr(mirror_group, field, value)
+                        updated = True
+            else:
+                mirror_group = MirrorGroup(
+                    bot_id=bot_id,
+                    group_id=global_config.manager_group_id,
+                    use_manager_bot=True,
+                    manager_group_id=global_config.manager_group_id,
+                    is_active=True,
+                    batch_size=global_config.batch_size,
+                    batch_delay=global_config.batch_delay,
+                    flush_timeout=global_config.flush_timeout,
+                )
+                session.add(mirror_group)
+                updated = True
+
+            if not updated:
+                return False
+
+            session.commit()
+            redis_client.delete(f"mirror_config:{bot_id}")
+
+            logger.info(
+                "Centralized mirror ensured for bot",
+                extra={
+                    "bot_id": bot_id,
+                    "admin_id": admin_id,
+                    "manager_group_id": global_config.manager_group_id,
+                },
+            )
+
+            return True
 
     @classmethod
     def get_or_create_topic(

@@ -4,6 +4,7 @@ Clientes para APIs externas (Telegram, etc)
 
 import asyncio
 import json
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -44,11 +45,28 @@ class TelegramAPI:
             response.raise_for_status()
             return response.json()
 
+    async def delete_webhook(self, token: str) -> Dict[str, Any]:
+        """Remove webhook configurado para o bot."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/deleteWebhook",
+                json={"drop_pending_updates": True},
+            )
+            response.raise_for_status()
+            return response.json()
+
     def send_message_sync(
-        self, token: str, chat_id: int, text: str, keyboard: Optional[Dict] = None
+        self,
+        token: str,
+        chat_id: int,
+        text: str,
+        keyboard: Optional[Dict] = None,
+        parse_mode: Optional[str] = "Markdown",
     ) -> Dict[str, Any]:
         """Envia mensagem (versão síncrona para workers)"""
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        payload = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if keyboard:
             payload["reply_markup"] = keyboard
 
@@ -67,12 +85,54 @@ class TelegramAPI:
                     continue
                 raise
 
+    def edit_message_media_sync(
+        self,
+        token: str,
+        chat_id: int,
+        message_id: int,
+        *,
+        photo_path: str,
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = "Markdown",
+        keyboard: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Edita a mídia principal de uma mensagem existente com uma nova foto."""
+
+        data = {
+            "chat_id": str(chat_id),
+            "message_id": str(message_id),
+            "media": json.dumps(
+                {
+                    "type": "photo",
+                    "media": "attach://photo",
+                    **({"caption": caption} if caption else {}),
+                    **({"parse_mode": parse_mode} if parse_mode else {}),
+                }
+            ),
+        }
+
+        if keyboard:
+            data["reply_markup"] = json.dumps(keyboard)
+
+        with open(photo_path, "rb") as photo:
+            filename = os.path.basename(photo_path) or "chart.png"
+            files = {"photo": (filename, photo, "image/png")}
+
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    f"{self.BASE_URL}{token}/editMessageMedia",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+
     async def send_message(
         self,
         token: str,
         chat_id: int,
         text: str,
-        parse_mode: Optional[str] = None,
+        parse_mode: Optional[str] = "Markdown",
         reply_markup: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Envia mensagem (versão assíncrona)"""
@@ -374,6 +434,55 @@ class TelegramAPI:
                 response.raise_for_status()
                 return response.json()
 
+    async def send_voice(
+        self,
+        token: str,
+        chat_id: int,
+        voice,  # Can be str (file_id) or BytesIO (stream)
+        caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        reply_markup: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Envia voice note"""
+        from io import BytesIO
+
+        if isinstance(voice, BytesIO):
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            if reply_markup:
+                data["reply_markup"] = json.dumps(reply_markup)
+
+            filename = getattr(voice, "name", "voice.ogg")
+            files = {"voice": (filename, voice, "audio/ogg")}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.BASE_URL}{token}/sendVoice",
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                return response.json()
+
+        payload = {"chat_id": chat_id, "voice": voice}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{token}/sendVoice",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def send_animation(
         self,
         token: str,
@@ -428,16 +537,24 @@ class TelegramAPI:
                 return response.json()
 
     def answer_callback_query_sync(
-        self, token: str, callback_query_id: str, text: str = ""
+        self,
+        token: str,
+        callback_query_id: str,
+        text: str = "",
+        show_alert: bool = False,
     ) -> Dict[str, Any]:
         """Responde callback query (versão síncrona)"""
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                payload = {"callback_query_id": callback_query_id, "text": text}
+                if show_alert:
+                    payload["show_alert"] = show_alert
+
                 with httpx.Client(timeout=30.0) as client:
                     response = client.post(
                         f"{self.BASE_URL}{token}/answerCallbackQuery",
-                        json={"callback_query_id": callback_query_id, "text": text},
+                        json=payload,
                     )
                     response.raise_for_status()
                     return response.json()
@@ -454,14 +571,16 @@ class TelegramAPI:
         message_id: int,
         text: str,
         keyboard: Optional[Dict] = None,
+        parse_mode: Optional[str] = "Markdown",
     ) -> Dict[str, Any]:
         """Edita mensagem (versão síncrona)"""
         payload = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
-            "parse_mode": "Markdown",
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if keyboard:
             payload["reply_markup"] = keyboard
 

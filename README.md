@@ -216,6 +216,7 @@ kubectl logs -f deployment/webhook
 
 - [AGENTS.MD](AGENTS.MD) - Documentação completa da arquitetura
 - [CLAUDE.md](CLAUDE.md) - Guia de desenvolvimento Python
+- [docs/prompt_import_export.md](docs/prompt_import_export.md) - Fluxo de importação/exportação de prompts em .txt
 
 ## 📝 Licença
 

@@ -39,9 +39,12 @@ def db_session(db_engine) -> Generator[Session, None, None]:
     session = SessionLocal()
 
     # Mock SessionLocal para repositórios usarem a mesma sessão
-    with patch("database.repos.SessionLocal") as repo_session_factory, patch(
-        "database.notifications.repos.SessionLocal"
-    ) as notification_session_factory:
+    with (
+        patch("database.repos.SessionLocal") as repo_session_factory,
+        patch(
+            "database.notifications.repos.SessionLocal"
+        ) as notification_session_factory,
+    ):
         for factory in (repo_session_factory, notification_session_factory):
             factory.return_value.__enter__ = lambda self: session
             factory.return_value.__exit__ = lambda self, *args: None

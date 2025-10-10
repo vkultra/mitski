@@ -9,11 +9,31 @@ from database.repos import AIActionBlockRepository, AIActionRepository
 from services.ai.actions import ActionService
 from services.conversation_state import ConversationStateManager
 
+from .audio_menu_handlers import build_audio_buttons
+
 
 async def handle_action_menu_click(user_id: int, bot_id: int) -> Dict[str, Any]:
     """Menu principal de ações"""
+    audio_callbacks = build_audio_buttons(user_id, bot_id)
+    audio_row = [
+        {"text": "🎧 Áudios", "callback_data": audio_callbacks["info"]},
+        {"text": "⚙️ Configurar", "callback_data": audio_callbacks["menu"]},
+    ]
+
     if user_id not in settings.allowed_admin_ids_list:
-        return {"text": "⛔ Acesso negado.", "keyboard": None}
+        keyboard = {
+            "inline_keyboard": [
+                audio_row,
+                [{"text": "🔙 Voltar", "callback_data": f"ai_select_bot:{bot_id}"}],
+            ]
+        }
+        return {
+            "text": (
+                "🎧 *Áudios*\n\n"
+                "Use os botões abaixo para configurar a resposta padrão ou o reconhecimento via Whisper."
+            ),
+            "keyboard": keyboard,
+        }
 
     # Buscar ações do bot
     actions = await AIActionRepository.get_actions_by_bot(bot_id)
@@ -33,10 +53,19 @@ async def handle_action_menu_click(user_id: int, bot_id: int) -> Dict[str, Any]:
             action_buttons.append(row)
             row = []
 
-    # Botão de adicionar sempre no topo
+    # Linha inicial com atalhos de /start
     keyboard_buttons = [
-        [{"text": "➕ Adicionar Ação", "callback_data": f"action_add:{bot_id}"}]
+        [
+            {"text": "🚀 /start", "callback_data": f"start_template_info:{bot_id}"},
+            {"text": "⚙️ Configurar", "callback_data": f"start_template_menu:{bot_id}"},
+        ],
+        audio_row,
     ]
+
+    # Botão de adicionar sempre abaixo dos atalhos
+    keyboard_buttons.append(
+        [{"text": "➕ Adicionar Ação", "callback_data": f"action_add:{bot_id}"}]
+    )
 
     # Adicionar botões das ações
     keyboard_buttons.extend(action_buttons)

@@ -51,7 +51,7 @@ nano .env
 - `MANAGER_BOT_TOKEN` - Token do bot gerenciador (obter do @BotFather)
 - `TELEGRAM_WEBHOOK_SECRET` - Secret aleatório para validação
 - `ENCRYPTION_KEY` - Chave gerada pelo script acima
-- `ALLOWED_ADMIN_IDS` - Seus IDs do Telegram (separados por vírgula)
+- `ALLOWED_ADMIN_IDS` - (Opcional) deixe em branco para liberar todas as funções
 
 ## 2. Iniciar com Docker (Recomendado)
 

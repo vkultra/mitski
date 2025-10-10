@@ -51,13 +51,19 @@ class TelegramNotificationClient:
                     data = response.json()
                     if not data.get("ok", False):
                         raise httpx.HTTPStatusError(
-                            f"Telegram API error: {data}", request=response.request, response=response
+                            f"Telegram API error: {data}",
+                            request=response.request,
+                            response=response,
                         )
                     return data["result"]
             except httpx.HTTPStatusError as exc:  # Algo retornou erro
                 status = exc.response.status_code if exc.response else "n/a"
                 if status == 429 and attempt < self.max_retries:
-                    retry_after = exc.response.json().get("parameters", {}).get("retry_after", backoff)
+                    retry_after = (
+                        exc.response.json()
+                        .get("parameters", {})
+                        .get("retry_after", backoff)
+                    )
                     time.sleep(float(retry_after))
                     backoff *= 2
                     continue

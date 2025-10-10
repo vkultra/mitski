@@ -8,6 +8,7 @@ from typing import Iterable, List, Optional
 from core.telemetry import logger
 from database.models import RecoveryBlock
 from services.media_stream import MediaStreamService
+from services.media_voice_enforcer import VoiceConversionError, normalize_media_type
 from workers.api_clients import TelegramAPI
 
 
@@ -83,15 +84,28 @@ class RecoveryMessageSender:
         block: RecoveryBlock,
         bot_id: Optional[int],
     ) -> Optional[int]:
+        source_media_type = block.media_type
+        media_type = normalize_media_type(source_media_type)
         file_to_send = block.media_file_id
         stream = None
 
         if bot_id:
-            cached_file_id, stream = await MediaStreamService.get_or_stream_media(
-                original_file_id=block.media_file_id,
-                bot_id=bot_id,
-                media_type=block.media_type,
-            )
+            try:
+                cached_file_id, stream = await MediaStreamService.get_or_stream_media(
+                    original_file_id=block.media_file_id,
+                    bot_id=bot_id,
+                    media_type=media_type,
+                    source_media_type=source_media_type,
+                )
+            except VoiceConversionError:
+                logger.error(
+                    "Voice conversion failed for recovery block",
+                    extra={
+                        "bot_id": bot_id,
+                        "block_id": getattr(block, "id", None),
+                    },
+                )
+                return None
             if cached_file_id:
                 file_to_send = cached_file_id
             elif stream:
@@ -105,35 +119,35 @@ class RecoveryMessageSender:
             "parse_mode": block.parse_mode if block.text else None,
         }
 
-        if block.media_type == "photo":
+        if media_type == "photo":
             result = await self.telegram_api.send_photo(photo=file_to_send, **kwargs)
-        elif block.media_type == "video":
+        elif media_type == "video":
             result = await self.telegram_api.send_video(video=file_to_send, **kwargs)
-        elif block.media_type == "audio":
-            result = await self.telegram_api.send_audio(audio=file_to_send, **kwargs)
-        elif block.media_type == "document":
+        elif media_type == "voice":
+            result = await self.telegram_api.send_voice(voice=file_to_send, **kwargs)
+        elif media_type == "document":
             result = await self.telegram_api.send_document(
                 document=file_to_send, **kwargs
             )
-        elif block.media_type in {"animation", "gif"}:
+        elif media_type in {"animation", "gif"}:
             result = await self.telegram_api.send_animation(
                 animation=file_to_send, **kwargs
             )
         else:
             logger.warning(
                 "Unsupported media type for recovery block",
-                extra={"media_type": block.media_type, "block_id": block.id},
+                extra={"media_type": media_type, "block_id": block.id},
             )
             return None
 
         if result and bot_id and stream is not None:
-            new_file_id = self._extract_file_id(result, block.media_type)
+            new_file_id = self._extract_file_id(result, media_type)
             if new_file_id:
                 await MediaStreamService.cache_media_file_id(
                     original_file_id=block.media_file_id,
                     bot_id=bot_id,
                     new_file_id=new_file_id,
-                    media_type=block.media_type,
+                    media_type=media_type,
                 )
 
         return result.get("result", {}).get("message_id") if result else None
@@ -146,7 +160,7 @@ class RecoveryMessageSender:
             return photos[-1]["file_id"] if photos else None
         field = {
             "video": "video",
-            "audio": "audio",
+            "voice": "voice",
             "document": "document",
             "animation": "animation",
             "gif": "animation",

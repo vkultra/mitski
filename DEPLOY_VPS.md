@@ -105,7 +105,7 @@ nano .env.production
 MANAGER_BOT_TOKEN=seu_token_real_aqui
 WEBHOOK_BASE_URL=https://seu_dominio_ou_ip
 XAI_API_KEY=seu_token_xai
-ALLOWED_ADMIN_IDS=seu_id_telegram
+ALLOWED_ADMIN_IDS=                 # opcional: deixe vazio para liberar todas as funções
 DB_PASSWORD=senha_forte_para_producao
 FLOWER_PASSWORD=senha_para_flower
 ```

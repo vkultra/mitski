@@ -6,9 +6,10 @@ Serviço para registro e validação de bots secundários
 import os
 from typing import Any, Dict
 
-from core.security import encrypt
+from core.security import decrypt, encrypt
 from core.telemetry import logger
 from database.repos import BotRepository
+from services.mirror import MirrorService
 from workers.api_clients import TelegramAPI
 
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "http://localhost:8000")
@@ -113,6 +114,31 @@ class BotRegistrationService:
                 drop_pending_updates=True,
             )
 
+            try:
+                if MirrorService.ensure_centralized_mirror_for_bot(bot.id, admin_id):
+                    mirror_config = MirrorService.get_mirror_config(bot.id)
+                    logger.info(
+                        "Bot auto-linked to centralized mirror",
+                        extra={
+                            "bot_id": bot.id,
+                            "admin_id": admin_id,
+                            "manager_group_id": (
+                                mirror_config.get("manager_group_id")
+                                if mirror_config
+                                else None
+                            ),
+                        },
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "Failed to auto-configure centralized mirror",
+                    extra={
+                        "bot_id": bot.id,
+                        "admin_id": admin_id,
+                        "error": str(exc),
+                    },
+                )
+
             logger.info(
                 "Bot registered successfully",
                 extra={
@@ -216,5 +242,42 @@ class BotRegistrationService:
 
         if success:
             logger.info("Bot activated", extra={"bot_id": bot_id, "admin_id": admin_id})
+
+        return success
+
+    @staticmethod
+    async def delete_bot(admin_id: int, bot_id: int) -> bool:
+        """Remove permanentemente um bot cadastrado pelo usuário."""
+        bot = await BotRepository.get_bot_by_id(bot_id)
+
+        if not bot:
+            raise ValueError("Bot não encontrado")
+
+        if bot.admin_id != admin_id:
+            raise ValueError("Você não tem permissão para excluir este bot")
+
+        token_plain = None
+        try:
+            token_plain = decrypt(bot.token)
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning(
+                "Failed to decrypt bot token before deletion",
+                extra={"bot_id": bot_id, "error": str(exc)},
+            )
+
+        if token_plain:
+            try:
+                telegram_api = TelegramAPI()
+                await telegram_api.delete_webhook(token_plain)
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning(
+                    "Failed to delete webhook before bot removal",
+                    extra={"bot_id": bot_id, "error": str(exc)},
+                )
+
+        success = await BotRepository.delete_bot(bot_id)
+
+        if success:
+            logger.info("Bot deleted", extra={"bot_id": bot_id, "admin_id": admin_id})
 
         return success

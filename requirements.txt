@@ -25,6 +25,9 @@ xai-sdk
 # Image Processing (for AI)
 pillow==10.4.0
 
+# Charts
+matplotlib==3.9.2
+
 # Security
 cryptography==43.0.3
 pybreaker==1.2.0
